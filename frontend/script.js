@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const dropZone = document.getElementById('drop-zone');
+    const dropArea = document.getElementById('drop-area');
     const fileInput = document.getElementById('file-input');
+    const selectBtn = document.getElementById('select-btn');
+    
     const uploadSection = document.getElementById('upload-section');
     const processingSection = document.getElementById('processing-section');
     const resultSection = document.getElementById('result-section');
@@ -30,11 +32,16 @@ document.addEventListener('DOMContentLoaded', () => {
     wavesurfer.on('play', () => playPauseBtn.textContent = '⏸ Pause');
     wavesurfer.on('pause', () => playPauseBtn.textContent = '▶ Play');
 
-    // Drag and Drop Logic
-    dropZone.addEventListener('click', () => fileInput.click());
+    // Click events for file selection
+    if (dropArea) dropArea.addEventListener('click', () => fileInput.click());
+    if (selectBtn) selectBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+    });
 
+    // Drag and Drop Logic
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, preventDefaults, false);
+        if (dropArea) dropArea.addEventListener(eventName, preventDefaults, false);
     });
 
     function preventDefaults(e) {
@@ -43,22 +50,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        if (dropArea) dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
     });
 
     ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        if (dropArea) dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
     });
 
-    dropZone.addEventListener('drop', (e) => {
-        let dt = e.dataTransfer;
-        let files = dt.files;
-        if (files.length > 0) handleFile(files[0]);
-    });
+    if (dropArea) {
+        dropArea.addEventListener('drop', (e) => {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+    }
 
-    fileInput.addEventListener('change', function() {
-        if (this.files.length > 0) handleFile(this.files[0]);
-    });
+    if (fileInput) {
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) handleFile(this.files[0]);
+        });
+    }
 
     async function handleFile(file) {
         if (!file.type.startsWith('audio/')) {
@@ -70,8 +81,8 @@ document.addEventListener('DOMContentLoaded', () => {
         originalAudioUrl = URL.createObjectURL(file);
 
         // Switch UI to Processing
-        uploadSection.classList.add('hidden');
-        processingSection.classList.remove('hidden');
+        if (uploadSection) uploadSection.classList.add('hidden');
+        if (processingSection) processingSection.classList.remove('hidden');
 
         // Send to Backend
         const formData = new FormData();
@@ -89,56 +100,65 @@ document.addEventListener('DOMContentLoaded', () => {
             enhancedAudioUrl = URL.createObjectURL(blob);
             
             // Setup Download button
-            downloadBtn.href = enhancedAudioUrl;
+            if (downloadBtn) downloadBtn.href = enhancedAudioUrl;
             
             // Switch UI to Results
-            processingSection.classList.add('hidden');
-            resultSection.classList.remove('hidden');
+            if (processingSection) processingSection.classList.add('hidden');
+            if (resultSection) resultSection.classList.remove('hidden');
             
             // Load enhanced audio by default (toggle is checked)
-            compareToggle.checked = true;
+            if (compareToggle) compareToggle.checked = true;
             updateLabels(true);
             wavesurfer.load(enhancedAudioUrl);
             
         } catch (error) {
+            console.error(error);
             alert('Error processing audio. Ensure the backend is running.');
             resetApp();
         }
     }
 
     // Controls Logic
-    playPauseBtn.addEventListener('click', () => {
-        wavesurfer.playPause();
-    });
-
-    compareToggle.addEventListener('change', (e) => {
-        const isEnhanced = e.target.checked;
-        const currentTime = wavesurfer.getCurrentTime();
-        const isPlaying = wavesurfer.isPlaying();
-        
-        updateLabels(isEnhanced);
-        
-        // Switch audio source
-        wavesurfer.load(isEnhanced ? enhancedAudioUrl : originalAudioUrl).then(() => {
-            wavesurfer.seekTo(currentTime / wavesurfer.getDuration());
-            if (isPlaying) wavesurfer.play();
+    if (playPauseBtn) {
+        playPauseBtn.addEventListener('click', () => {
+            wavesurfer.playPause();
         });
-    });
+    }
+
+    if (compareToggle) {
+        compareToggle.addEventListener('change', (e) => {
+            const isEnhanced = e.target.checked;
+            const currentTime = wavesurfer.getCurrentTime();
+            const isPlaying = wavesurfer.isPlaying();
+            
+            updateLabels(isEnhanced);
+            
+            // Switch audio source
+            wavesurfer.load(isEnhanced ? enhancedAudioUrl : originalAudioUrl).then(() => {
+                wavesurfer.seekTo(currentTime / wavesurfer.getDuration());
+                if (isPlaying) wavesurfer.play();
+            });
+        });
+    }
 
     function updateLabels(isEnhanced) {
         const labels = document.querySelectorAll('.toggle-container .label');
-        if (isEnhanced) {
-            labels[0].classList.remove('active-label');
-            labels[1].classList.add('active-label');
-            wavesurfer.setOptions({ progressColor: '#8b5cf6' }); // Purple
-        } else {
-            labels[1].classList.remove('active-label');
-            labels[0].classList.add('active-label');
-            wavesurfer.setOptions({ progressColor: '#ec4899' }); // Pinkish/Red
+        if (labels.length >= 2) {
+            if (isEnhanced) {
+                labels[0].classList.remove('active-label');
+                labels[1].classList.add('active-label');
+                wavesurfer.setOptions({ progressColor: '#8b5cf6' }); // Purple
+            } else {
+                labels[1].classList.remove('active-label');
+                labels[0].classList.add('active-label');
+                wavesurfer.setOptions({ progressColor: '#ec4899' }); // Pinkish/Red
+            }
         }
     }
 
-    resetBtn.addEventListener('click', resetApp);
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetApp);
+    }
 
     function resetApp() {
         if (wavesurfer.isPlaying()) wavesurfer.pause();
@@ -147,10 +167,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (originalAudioUrl) URL.revokeObjectURL(originalAudioUrl);
         if (enhancedAudioUrl) URL.revokeObjectURL(enhancedAudioUrl);
         
-        fileInput.value = '';
+        if (fileInput) fileInput.value = '';
         
-        resultSection.classList.add('hidden');
-        processingSection.classList.add('hidden');
-        uploadSection.classList.remove('hidden');
+        if (resultSection) resultSection.classList.add('hidden');
+        if (processingSection) processingSection.classList.add('hidden');
+        if (uploadSection) uploadSection.classList.remove('hidden');
     }
 });

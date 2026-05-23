@@ -6,7 +6,12 @@ import os
 import shutil
 import uuid
 import subprocess
+import scipy.signal as signal
 import numpy as np
+import noisereduce as nr
+from pedalboard import Pedalboard, NoiseGate, Compressor, LowShelfFilter, HighShelfFilter, HighpassFilter, Limiter
+
+
 import torch
 import soundfile as sf
 import imageio_ffmpeg
@@ -75,11 +80,29 @@ async def enhance_audio(file: UploadFile = File(...)):
     with torch.no_grad():
         enhanced = model(wav_tensor.unsqueeze(0))[0]
 
-    # 6. Normalise & save
-    enhanced = enhanced.cpu()
-    enhanced = enhanced / (torch.max(torch.abs(enhanced)) + 1e-8)
-    enhanced_np = enhanced.numpy().T  # → (frames, channels)
-    sf.write(output_path, enhanced_np, model.sample_rate)
+    # 6. Post‑process: AI denoiser leaves some artifacts, so we apply noisereduce + mastering
+    enhanced_np = enhanced.cpu().numpy().T  # (frames, channels)
+
+    # Apply spectral noise reduction to clean up remaining background hiss
+    # noisereduce expects (channels, frames) so we transpose, process, then transpose back
+    cleaned_np = nr.reduce_noise(y=enhanced_np.T, sr=model.sample_rate, prop_decrease=0.7).T
+
+    # 7. Apply Studio Mastering Chain with Pedalboard
+    board = Pedalboard([
+        HighpassFilter(cutoff_frequency_hz=80.0),            # Remove low-end rumble
+        NoiseGate(threshold_db=-45.0, ratio=1.5, release_ms=250), # Clean up silence
+        LowShelfFilter(cutoff_frequency_hz=200, gain_db=2.0), # Add warmth
+        HighShelfFilter(cutoff_frequency_hz=4000, gain_db=3.0), # Add presence/clarity
+        Compressor(threshold_db=-18.0, ratio=3.0, attack_ms=5.0, release_ms=50.0), # Smooth dynamics
+        Limiter(threshold_db=-1.0) # Prevent clipping
+    ])
+    
+    # pedalboard also expects (channels, frames)
+    mastered_audio = board(cleaned_np.T, model.sample_rate).T
+    
+    # 8. Save final output
+    sf.write(output_path, mastered_audio, model.sample_rate)
+
 
     return FileResponse(
         output_path,
