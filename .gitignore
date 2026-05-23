@@ -1,0 +1,38 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Byte‑code caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Env files / secrets
+.env
+.env.*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE / editor folders
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Build / distribution
+build/
+Dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# FastAPI / uvicorn
+uvicorn.pid
+
+# Any temporary files
+tmp/
+*.tmp
