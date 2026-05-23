@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudioVoice | AI Audio Enhancer</title>
+    <meta name="description" content="Enhance your voice audio to studio quality instantly using state-of-the-art AI.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <main class="glass-container">
+        <header>
+            <h1>Studio<span>Voice</span></h1>
+            <p>Transform any recording into a professional studio podcast using AI</p>
+        </header>
+
+        <section id="upload-section" class="upload-area">
+            <div id="drop-zone" class="drop-zone">
+                <div class="icon">🎙️</div>
+                <h2>Drag & Drop your audio file here</h2>
+                <p>or click to browse (.wav, .mp3, .m4a)</p>
+                <input type="file" id="file-input" accept="audio/*" hidden>
+            </div>
+        </section>
+
+        <section id="processing-section" class="processing-area hidden">
+            <div class="spinner"></div>
+            <h2>Enhancing Audio...</h2>
+            <p>Our AI is removing background noise and room echo. This takes a few seconds.</p>
+        </section>
+
+        <section id="result-section" class="result-area hidden">
+            <h2>Your Studio Audio is Ready ✨</h2>
+            
+            <div class="player-container glass-card">
+                <div class="player-controls">
+                    <button id="play-pause-btn" class="btn primary-btn">▶ Play</button>
+                    <div class="toggle-container">
+                        <span class="label">Original</span>
+                        <label class="switch">
+                            <input type="checkbox" id="compare-toggle" checked>
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="label active-label">Enhanced</span>
+                    </div>
+                </div>
+                
+                <!-- Waveform Container -->
+                <div id="waveform" class="waveform-box"></div>
+                
+                <div class="action-buttons">
+                    <a id="download-btn" class="btn success-btn" download="enhanced_audio.wav">Download Enhanced Audio</a>
+                    <button id="reset-btn" class="btn secondary-btn">Enhance Another</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Wavesurfer.js for audio visualization -->
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script src="script.js"></script>
+</body>
+</html>
