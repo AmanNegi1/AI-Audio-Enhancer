@@ -1,0 +1,32 @@
+{
+  "series": "Kagurabachi",
+  "characters": {
+    "Chihiro": {
+      "hair": [23, 23, 33],
+      "skin_bright": [247, 214, 189],
+      "skin_mid": [222, 178, 153],
+      "skin_shadow": [184, 133, 107],
+      "coat_dark": [18, 18, 28],
+      "coat_mid": [43, 43, 59],
+      "eyes": [64, 102, 148]
+    },
+    "Char": {
+      "hair": [240, 209, 71],
+      "hair_bright": [255, 237, 133],
+      "skin_bright": [247, 219, 194],
+      "skin_mid": [222, 184, 158],
+      "outfit_dark": [20, 20, 31],
+      "outfit_stripe": [247, 247, 247]
+    }
+  },
+  "environment": {
+    "sky_blue": [184, 194, 219],
+    "ground_warm": [173, 158, 128],
+    "building_cream": [230, 222, 204],
+    "floor_grey": [158, 158, 168],
+    "blood_red": [166, 20, 15],
+    "magic_blue": [153, 189, 245],
+    "sword_steel": [191, 204, 240],
+    "tsuba_gold": [230, 189, 71]
+  }
+}
