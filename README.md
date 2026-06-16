@@ -25,9 +25,9 @@ Voice Enhancer/
 
 ## 🛠️ Prerequisites
 - **Windows 10/11** with **PowerShell**.
-- **Python 3.13+** (the script uses the built‑in `venv` module).
+- **Python 3.12 or 3.13**. Avoid Python 3.14 for first-time setup unless you already know all required wheels are available in your environment.
 - **Git** (only needed if you plan to push to a remote).
-- No separate **Node.js** installation required – the frontend is pure static files.
+- No separate **Node.js** installation required - the frontend is pure static files.
 
 ---
 
@@ -36,23 +36,26 @@ Voice Enhancer/
    ```powershell
    cd "D:\Voice Enhancer"
    ```
-2. **Create and activate a virtual environment** (if one does not already exist):
+2. **Create and activate a virtual environment in the repo root** (if one does not already exist):
    ```powershell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1   # activate the env
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
    ```
-3. **Install the Python dependencies** (the required packages are already listed in the environment, but you can reinstall for safety):
+3. **Install the Python dependencies**:
    ```powershell
    pip install -U pip setuptools
-   pip install fastapi uvicorn denoiser imageio-ffmpeg soundfile scipy torch torchaudio
+   pip install fastapi uvicorn denoiser imageio-ffmpeg soundfile scipy torch torchaudio noisereduce pedalboard python-multipart
    ```
 4. **Run the backend server**:
    ```powershell
-   uvicorn main:app --host 0.0.0.0 --port 8000
+   .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
    ```
    You should see:
    ```
-   INFO: Started server process [...]\nINFO: Application startup complete.
+   Loading AI denoiser model...
+   Model ready on cpu!
+   INFO:     Started server process [...]
+   INFO:     Application startup complete.
    INFO: Uvicorn running on http://0.0.0.0:8000
    ```
 5. **Open the web UI** in any browser:
@@ -72,7 +75,7 @@ If you want to expose the service publicly:
 
 ## 🧹 Clean‑up
 - To deactivate the virtual environment: `deactivate`.
-- The `venv/` directory can be deleted safely if you need to rebuild it.
+- The `.venv/` directory can be deleted safely if you need to rebuild it.
 
 ---
 
