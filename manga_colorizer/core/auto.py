@@ -745,3 +745,39 @@ def apply_hue_shift(img_rgb: np.ndarray, degrees: float) -> np.ndarray:
 def apply_mirror(img_rgb: np.ndarray) -> np.ndarray:
     """Horizontal flip — strong perceptual-hash breaker."""
     return cv2.flip(img_rgb, 1)
+
+
+def apply_chromatic_aberration(img_rgb: np.ndarray, shift_px: int,
+                               direction: str = 'horizontal') -> np.ndarray:
+    """
+    Chromatic aberration: shifts the R channel one way and the B channel the
+    opposite way, leaving G unchanged.  Creates vivid colour fringing around
+    every hard edge — subtle at 2-4 px, dramatic at 8-15 px.  Wrap-around
+    pixels at the edges are clamped to the original value to avoid seam artefacts.
+    """
+    s = max(1, int(shift_px))
+    r = img_rgb[:, :, 0].astype(np.float32)
+    b = img_rgb[:, :, 2].astype(np.float32)
+
+    result = img_rgb.astype(np.float32).copy()
+
+    if direction == 'vertical':
+        result[:, :, 0] = np.roll(r,  s, axis=0)
+        result[:, :, 2] = np.roll(b, -s, axis=0)
+        result[:s,  :, 0] = r[:s,  :]
+        result[-s:, :, 2] = b[-s:, :]
+    elif direction == 'diagonal':
+        hs = max(1, s // 2)
+        result[:, :, 0] = np.roll(np.roll(r,  hs, axis=0),  hs, axis=1)
+        result[:, :, 2] = np.roll(np.roll(b, -hs, axis=0), -hs, axis=1)
+        result[:hs,  :,   0] = r[:hs,  :  ]
+        result[:,    :hs, 0] = r[:,    :hs]
+        result[-hs:, :,   2] = b[-hs:, :  ]
+        result[:,   -hs:, 2] = b[:,   -hs:]
+    else:  # horizontal (default)
+        result[:, :, 0] = np.roll(r,  s, axis=1)
+        result[:, :, 2] = np.roll(b, -s, axis=1)
+        result[:, :s,  0] = r[:, :s ]
+        result[:, -s:, 2] = b[:, -s:]
+
+    return np.clip(result, 0, 255).astype(np.uint8)

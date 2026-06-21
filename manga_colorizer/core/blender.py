@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def blend_layers(original_rgb, color_layers, geometric_shapes=None, brightness=1.0, contrast=1.0):
+def blend_layers(original_rgb, color_layers, geometric_shapes=None, brightness=1.0, contrast=1.0, blend_mode="Multiply"):
     """
     Blends the original black-and-white lines with color canvas layers
     and optional geometric block overlays.
@@ -54,80 +54,63 @@ def blend_layers(original_rgb, color_layers, geometric_shapes=None, brightness=1
                 + opacity * geom_color
             )
             
-    # 3. Blend original lines + color canvas
-    # Formula:
-    # If the original pixel is very dark (ink line), keep it near black.
-    # Otherwise, multiply the colors to preserve screentone/hatching textures.
+    # 3. Blend original lines with the colour canvas
     gray = cv2.cvtColor(original_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
-    
-    # Ink lines threshold
-    ink_mask = gray < 0.28
-    paper_mask = gray > 0.90
-    
+
+    # Adaptive ink/paper thresholds from the page's own histogram so the
+    # blender works correctly across light, dark, and toned pages.
+    gray_u8 = (gray * 255).astype(np.uint8)
+    ink_thresh   = max(0.10, min(0.35, float(np.percentile(gray_u8, 12)) / 255.0 + 0.12))
+    paper_thresh = max(0.72, min(0.96, float(np.percentile(gray_u8, 88)) / 255.0 - 0.03))
+
+    ink_mask   = gray < ink_thresh
+    paper_mask = gray > paper_thresh
+    mid_mask   = ~(paper_mask | ink_mask)
+
     blended = np.zeros_like(canvas_float)
-    
-    # Paper zones: show clean colors
-    blended[paper_mask] = canvas_float[paper_mask]
-    
-    # Ink zones: keep near-black ink
-    blended[ink_mask] = [0.03, 0.03, 0.04]
-    
-    # Midtones/hatching/screentones: multiply blend to show original texture + colors
-    mid_mask = ~(paper_mask | ink_mask)
-    blended[mid_mask] = (orig_float * canvas_float * 1.25)[mid_mask]
-    
-    # Clamp and convert back to 0-255
+
+    if blend_mode == "Replace":
+        # Use colour canvas directly — ideal for Neon Glow (dark-background layers).
+        blended = canvas_float.copy()
+        blended[ink_mask] = [0.03, 0.03, 0.04]
+    else:
+        blended[paper_mask] = canvas_float[paper_mask]
+        blended[ink_mask]   = [0.03, 0.03, 0.04]
+
+        if blend_mode == "Overlay":
+            result = np.where(
+                canvas_float <= 0.5,
+                2.0 * orig_float * canvas_float,
+                1.0 - 2.0 * (1.0 - orig_float) * (1.0 - canvas_float),
+            )
+            blended[mid_mask] = np.clip(result, 0, 1)[mid_mask]
+
+        elif blend_mode == "Screen":
+            result = 1.0 - (1.0 - orig_float) * (1.0 - canvas_float)
+            blended[mid_mask] = np.clip(result, 0, 1)[mid_mask]
+
+        elif blend_mode == "Hard Light":
+            result = np.where(
+                orig_float <= 0.5,
+                2.0 * orig_float * canvas_float,
+                1.0 - 2.0 * (1.0 - orig_float) * (1.0 - canvas_float),
+            )
+            blended[mid_mask] = np.clip(result, 0, 1)[mid_mask]
+
+        else:  # Multiply (default)
+            blended[mid_mask] = np.clip(orig_float * canvas_float * 1.25, 0, 1)[mid_mask]
+
+    # Clamp and convert to uint8
     blended = np.clip(blended * 255.0, 0, 255).astype(np.uint8)
-    
+
     # 4. Apply brightness and contrast adjustments
-    # New value = old value * contrast + brightness offset
     if brightness != 1.0 or contrast != 1.0:
-        # Center contrast around 128
         blended = cv2.convertScaleAbs(blended, alpha=contrast, beta=int((brightness - 1.0) * 100))
-        
-    # 5. Apply subtle sharpening to restore line crispness
-    kernel = np.array([[0, -0.3, 0], 
-                       [-0.3, 2.2, -0.3], 
+
+    # 5. Subtle sharpening to restore line crispness
+    kernel = np.array([[0, -0.3, 0],
+                       [-0.3, 2.2, -0.3],
                        [0, -0.3, 0]], dtype=np.float32)
     sharpened = cv2.filter2D(blended, -1, kernel)
-    
-    return np.clip(sharpened, 0, 255).astype(np.uint8)
-            
-    # 3. Blend original lines + color canvas
-    # Formula:
-    # If the original pixel is very dark (ink line), keep it near black.
-    # Otherwise, multiply the colors to preserve screentone/hatching textures.
-    gray = cv2.cvtColor(original_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
-    
-    # Ink lines threshold
-    ink_mask = gray < 0.28
-    paper_mask = gray > 0.90
-    
-    blended = np.zeros_like(canvas_float)
-    
-    # Paper zones: show clean colors
-    blended[paper_mask] = canvas_float[paper_mask]
-    
-    # Ink zones: keep near-black ink
-    blended[ink_mask] = [0.03, 0.03, 0.04]
-    
-    # Midtones/hatching/screentones: multiply blend to show original texture + colors
-    mid_mask = ~(paper_mask | ink_mask)
-    blended[mid_mask] = (orig_float * canvas_float * 1.25)[mid_mask]
-    
-    # Clamp and convert back to 0-255
-    blended = np.clip(blended * 255.0, 0, 255).astype(np.uint8)
-    
-    # 4. Apply brightness and contrast adjustments
-    # New value = old value * contrast + brightness offset
-    if brightness != 1.0 or contrast != 1.0:
-        # Center contrast around 128
-        blended = cv2.convertScaleAbs(blended, alpha=contrast, beta=int((brightness - 1.0) * 100))
-        
-    # 5. Apply subtle sharpening to restore line crispness
-    kernel = np.array([[0, -0.3, 0], 
-                       [-0.3, 2.2, -0.3], 
-                       [0, -0.3, 0]], dtype=np.float32)
-    sharpened = cv2.filter2D(blended, -1, kernel)
-    
+
     return np.clip(sharpened, 0, 255).astype(np.uint8)

@@ -1,6 +1,18 @@
 import cv2
 import numpy as np
 
+# EasyOCR reader is lazily initialised once per process and reused.
+_easyocr_reader = None
+
+
+def _get_reader():
+    """Return a cached EasyOCR Reader (Japanese + English, CPU)."""
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        import easyocr  # imported here so the module still loads without it
+        _easyocr_reader = easyocr.Reader(['ja', 'en'], gpu=False, verbose=False)
+    return _easyocr_reader
+
 
 # ---------------------------------------------------------------------------
 # Text-pixel detector + eraser
@@ -26,12 +38,11 @@ import numpy as np
 def detect_text_clusters(
     img_gray,
     min_char_area=10,
-    max_char_area_frac=0.0009,
-    bright_surround_thresh=0.72,
-    bright_pixel_thresh=215,
+    max_char_area_frac=0.0015,
+    bright_surround_thresh=0.55,
     dilate_x=22,
     dilate_y=10,
-    min_chars_per_cluster=3,
+    min_chars_per_cluster=2,
 ):
     """
     Find clusters of text pixels on the page.
@@ -59,11 +70,11 @@ def detect_text_clusters(
 
     n, labels, stats, _cent = cv2.connectedComponentsWithStats(bw, connectivity=8)
 
-    max_char_area = max(500, int(page_area * max_char_area_frac))
+    max_char_area = int(page_area * max_char_area_frac)
     text_mask = np.zeros_like(img_gray)
 
     # Pad for the "bright surround" check
-    pad = 8
+    pad = 4
 
     for i in range(1, n):
         x, y, cw, ch, area = stats[i]
@@ -76,11 +87,11 @@ def detect_text_clusters(
         aspect = cw / float(ch)
         if aspect > 6 or aspect < 0.16:
             continue
-        if max(cw, ch) > max(48, min(h, w) * 0.06):
+        if max(cw, ch) > min(h, w) * 0.10:
             continue
 
         density = area / float(cw * ch)
-        if density < 0.12 or density > 0.72:
+        if density < 0.18 or density > 0.95:
             continue
 
         # Check the area JUST OUTSIDE the component is mostly bright.
@@ -89,14 +100,19 @@ def detect_text_clusters(
         x1 = min(w, x + cw + pad); y1 = min(h, y + ch + pad)
         surround = img_gray[y0:y1, x0:x1]
 
-        # Exclude nearby foreground pixels so adjacent letters do not make
-        # the surround look like artwork.
-        foreground_local = (bw[y0:y1, x0:x1] > 0)
-        outside = surround[~foreground_local]
+        # Exclude the component itself from the surround.
+        comp_local = (labels[y0:y1, x0:x1] == i)
+        outside = surround[~comp_local]
         if outside.size == 0:
             continue
 
-        bright_frac = float(np.mean(outside > bright_pixel_thresh))
+        # Relative check: surround must be brighter than the text component
+        # itself, not just brighter than an absolute 200 threshold.
+        # This makes the detector work on gray/toned speech bubbles where
+        # the background is e.g. 150 rather than 240.
+        comp_vals = img_gray[y0:y1, x0:x1][comp_local]
+        comp_mean = float(np.mean(comp_vals)) if comp_vals.size > 0 else 128.0
+        bright_frac = float(np.mean(outside > comp_mean + 20))
         if bright_frac < bright_surround_thresh:
             continue
 
@@ -107,10 +123,18 @@ def detect_text_clusters(
     if int(np.count_nonzero(text_mask)) == 0:
         return {'text_mask': text_mask, 'clusters': []}
 
-    cluster_kernel = cv2.getStructuringElement(
+    # Two kernels: horizontal (left-to-right text) and vertical (top-to-bottom,
+    # common in manga). Take the union so both orientations cluster correctly.
+    kernel_h = cv2.getStructuringElement(
         cv2.MORPH_RECT, (max(3, dilate_x), max(3, dilate_y)),
     )
-    grouped = cv2.dilate(text_mask, cluster_kernel, iterations=2)
+    kernel_v = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (max(3, dilate_y), max(3, dilate_x)),
+    )
+    grouped = cv2.bitwise_or(
+        cv2.dilate(text_mask, kernel_h, iterations=2),
+        cv2.dilate(text_mask, kernel_v, iterations=2),
+    )
 
     n_c, labels_c, stats_c, _cent_c = cv2.connectedComponentsWithStats(
         grouped, connectivity=8,
@@ -145,6 +169,104 @@ def detect_text_clusters(
             'mask': cluster_text,  # local text mask, paint to white on erase
         })
 
+    # Multi-pass fallback: if nothing was found, retry with looser thresholds.
+    # This handles pages with unusual contrast, small fonts, or heavy toning.
+    if not clusters and bright_surround_thresh > 0.25:
+        return detect_text_clusters(
+            img_gray,
+            min_char_area=max(6, min_char_area - 2),
+            max_char_area_frac=max_char_area_frac * 1.5,
+            bright_surround_thresh=max(0.25, bright_surround_thresh - 0.2),
+            dilate_x=dilate_x,
+            dilate_y=dilate_y,
+            min_chars_per_cluster=max(1, min_chars_per_cluster - 1),
+        )
+
+    return {'text_mask': text_mask, 'clusters': clusters}
+
+
+# ---------------------------------------------------------------------------
+# AI-based text detection (EasyOCR / CRAFT)
+# ---------------------------------------------------------------------------
+
+def detect_text_clusters_ai(img_gray):
+    """
+    Use EasyOCR's CRAFT neural network to detect text regions.
+    Returns the same dict shape as detect_text_clusters() so both are
+    interchangeable:
+        {'text_mask': uint8 HxW, 'clusters': [{'x','y','w','h','n_chars','mask'}]}
+    """
+    h, w = img_gray.shape
+    reader = _get_reader()
+
+    # reader.detect() is detection-only (no OCR) — much faster than readtext.
+    # It returns (horizontal_list, free_list), each a list with one entry per
+    # input image.  We pass a single image so index [0] is always the result.
+    horizontal_list, free_list = reader.detect(
+        img_gray,
+        slope_ths=0.15,    # tolerate slight tilts in speech bubbles
+        ycenter_ths=0.5,
+        height_ths=0.5,
+        width_ths=0.5,
+        add_margin=0.05,   # small margin around each detected word box
+        min_size=8,
+    )
+    boxes_h = horizontal_list[0] if horizontal_list else []
+    boxes_f = free_list[0] if free_list else []
+
+    text_mask = np.zeros((h, w), dtype=np.uint8)
+
+    for box in boxes_h:
+        # box = [x_min, x_max, y_min, y_max]
+        x1, x2, y1, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        x1 = max(0, x1); y1 = max(0, y1)
+        x2 = min(w, x2); y2 = min(h, y2)
+        if x2 > x1 and y2 > y1:
+            text_mask[y1:y2, x1:x2] = 255
+
+    for quad in boxes_f:
+        # quad = [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+        pts = np.array([[int(p[0]), int(p[1])] for p in quad], dtype=np.int32)
+        cv2.fillPoly(text_mask, [pts], 255)
+
+    if int(np.count_nonzero(text_mask)) == 0:
+        return {'text_mask': text_mask, 'clusters': []}
+
+    # Group nearby word boxes into per-bubble clusters (same as CV path).
+    kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (22, 10))
+    kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 22))
+    grouped = cv2.bitwise_or(
+        cv2.dilate(text_mask, kernel_h, iterations=2),
+        cv2.dilate(text_mask, kernel_v, iterations=2),
+    )
+
+    n_c, labels_c, stats_c, _ = cv2.connectedComponentsWithStats(
+        grouped, connectivity=8,
+    )
+
+    clusters = []
+    for ci in range(1, n_c):
+        cx, cy, cw, ch, _ = stats_c[ci]
+        cluster_label_mask = (labels_c[cy:cy + ch, cx:cx + cw] == ci)
+        cluster_text = np.where(
+            cluster_label_mask,
+            text_mask[cy:cy + ch, cx:cx + cw],
+            0,
+        ).astype(np.uint8)
+        if int(np.count_nonzero(cluster_text)) == 0:
+            continue
+        sub_n, _, _, _ = cv2.connectedComponentsWithStats(
+            cluster_text, connectivity=8,
+        )
+        clusters.append({
+            'x': int(cx),
+            'y': int(cy),
+            'w': int(cw),
+            'h': int(ch),
+            'n_chars': max(0, sub_n - 1),
+            'mask': cluster_text,
+        })
+
     return {'text_mask': text_mask, 'clusters': clusters}
 
 
@@ -167,16 +289,25 @@ def detect_speech_bubbles(
     max_text_components=300,  # kept for slider compatibility (ignored)
 ):
     """
-    Text-pixel detector wrapped in the app's bubble API.
-    Each returned 'bubble' is actually a text cluster; erasing it paints
-    only the text pixels white (with a tiny margin).
+    Neural (EasyOCR CRAFT) text detector with CV heuristic fallback.
+    Each returned 'bubble' is a text cluster; erasing it paints only the
+    detected text pixels white (with a small margin).
     """
-    result = detect_text_clusters(
-        img_gray,
-        bright_pixel_thresh=max(180, min(245, int(white_thresh) - 10)),
-        min_chars_per_cluster=max(3, int(min_text_components)),
-    )
-    clusters = result['clusters']
+    # --- Primary path: EasyOCR neural detector ---
+    clusters = []
+    try:
+        result = detect_text_clusters_ai(img_gray)
+        clusters = result['clusters']
+    except Exception:
+        pass  # fall through to CV heuristics
+
+    # --- Fallback: CV heuristics (no EasyOCR or empty result) ---
+    if not clusters:
+        result = detect_text_clusters(
+            img_gray,
+            min_chars_per_cluster=max(1, int(min_text_components)),
+        )
+        clusters = result['clusters']
 
     bubbles = []
     for c in clusters:
@@ -197,14 +328,18 @@ def detect_speech_bubbles(
 # Eraser: paint only the text pixels (plus a small margin)
 # ---------------------------------------------------------------------------
 
-def erase_regions(img_rgb, regions, fill_color=(255, 255, 255), margin_px=2):
+def erase_regions(img_rgb, regions, fill_color=(255, 255, 255), margin_px=2, inpaint=False):
     """
     Paint detected text pixels with `fill_color`.
 
     - If the region carries a per-cluster 'mask' (from the new detector),
       we dilate it by `margin_px` and paint exactly those pixels. This
       preserves the bubble outline and surrounding artwork.
-    - If a region is just a rectangle (manual erase), we fill the rect.
+        - If a region is a manual bubble, we can fill an ellipse, rectangle,
+            or both for cleaner bubble coverage.
+    - When `inpaint=True`, uses cv2.INPAINT_TELEA to reconstruct the
+      background naturally. This produces much better results on gray,
+      toned, or gradient-filled speech bubbles.
     """
     out = img_rgb.copy()
     if not regions:
@@ -215,6 +350,30 @@ def erase_regions(img_rgb, regions, fill_color=(255, 255, 255), margin_px=2):
     margin_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, (margin_px * 2 + 1, margin_px * 2 + 1),
     )
+
+    if inpaint:
+        # Build a single combined mask from all regions, then inpaint once.
+        combined = np.zeros((h, w), dtype=np.uint8)
+        for r in regions:
+            local_mask = r.get('mask') if isinstance(r, dict) else None
+            if local_mask is not None:
+                rx = max(0, int(r['x'])); ry = max(0, int(r['y']))
+                mh, mw = local_mask.shape[:2]
+                rx2 = min(w, rx + mw); ry2 = min(h, ry + mh)
+                if rx2 > rx and ry2 > ry:
+                    combined[ry:ry2, rx:rx2] = np.maximum(
+                        combined[ry:ry2, rx:rx2],
+                        local_mask[:ry2 - ry, :rx2 - rx],
+                    )
+            else:
+                rx = max(0, int(r['x'])); ry = max(0, int(r['y']))
+                rx2 = min(w, rx + int(r['w'])); ry2 = min(h, ry + int(r['h']))
+                if rx2 > rx and ry2 > ry:
+                    combined[ry:ry2, rx:rx2] = 255
+        if margin_px > 0:
+            combined = cv2.dilate(combined, margin_kernel, iterations=1)
+        out = cv2.inpaint(out, combined, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+        return out
 
     for r in regions:
         local_mask = r.get('mask') if isinstance(r, dict) else None
@@ -231,12 +390,32 @@ def erase_regions(img_rgb, regions, fill_color=(255, 255, 255), margin_px=2):
             out[y:y2, x:x2][local > 0] = fill
             continue
 
-        # Manual rectangle fallback
+        # Manual shape fallback. Legacy manual regions have no shape and
+        # are treated as rectangles.
         x = int(r['x']); y = int(r['y'])
         bw = int(r['w']); bh = int(r['h'])
         x2 = min(w, x + bw); y2 = min(h, y + bh)
         x = max(0, x); y = max(0, y)
-        if x2 > x and y2 > y:
+        if x2 <= x or y2 <= y:
+            continue
+
+        shape = str(r.get('shape', 'rectangle')).lower() if isinstance(r, dict) else 'rectangle'
+        fill_tuple = tuple(int(c) for c in fill_color)
+
+        if shape in ('ellipse', 'bubble', 'double_pass'):
+            center = ((x + x2) // 2, (y + y2) // 2)
+            axes = (max(1, (x2 - x) // 2), max(1, (y2 - y) // 2))
+            cv2.ellipse(out, center, axes, 0, 0, 360, fill_tuple, -1)
+
+        if shape in ('rectangle', 'caption', 'double_pass'):
+            inset = int(r.get('inset_px', 0)) if isinstance(r, dict) else 0
+            rx1 = min(x2, max(x, x + inset))
+            ry1 = min(y2, max(y, y + inset))
+            rx2 = max(rx1, min(x2, x2 - inset))
+            ry2 = max(ry1, min(y2, y2 - inset))
+            if rx2 > rx1 and ry2 > ry1:
+                out[ry1:ry2, rx1:rx2] = fill
+        elif shape not in ('ellipse', 'bubble'):
             out[y:y2, x:x2] = fill
 
     return out
