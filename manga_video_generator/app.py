@@ -10,10 +10,15 @@ if os.path.exists(ENV_PATH):
                 os.environ[key.strip()] = val.strip()
 
 # Set defaults if not already loaded from .env
+# Prefer D:\ if available, otherwise fall back to a .cache folder next to this file
+_workspace = os.path.dirname(os.path.abspath(__file__))
+_d_drive = "D:\\"
+_cache_root = _d_drive if os.path.exists(_d_drive) else _workspace
+
 if "HF_HOME" not in os.environ:
-    os.environ["HF_HOME"] = "D:\\.cache\\huggingface"
+    os.environ["HF_HOME"] = os.path.join(_cache_root, ".cache", "huggingface")
 if "XDG_CACHE_HOME" not in os.environ:
-    os.environ["XDG_CACHE_HOME"] = "D:\\.cache"
+    os.environ["XDG_CACHE_HOME"] = os.path.join(_cache_root, ".cache")
 
 import streamlit as st
 import json
@@ -221,9 +226,24 @@ with tab_recap:
                 audio_file = None
         else:
             audio_file = st.file_uploader(
-                "Upload Voiceover Audio (.mp3, .wav, .m4a)", 
+                "Upload Voiceover Audio (.mp3, .wav, .m4a) — optional, auto-generates voice if skipped", 
                 type=["mp3", "wav", "m4a"]
             )
+        
+        # TTS Voice selector (shown only when no audio is uploaded)
+        if not st.session_state.get("use_demo_audio", False) and audio_file is None:
+            tts_voice = st.selectbox(
+                "Auto-generate voice accent (used when no audio uploaded)",
+                options=[
+                    "🇮🇳 Indian English",
+                    "🇮🇳 Hinglish (Roman script)",
+                    "🇮🇳 Hindi (Devanagari script)",
+                ],
+                index=0,
+                help="Indian English & Hinglish both use an Indian-accented English voice — best for Roman-script Hinglish. Hindi mode expects Devanagari text."
+            )
+        else:
+            tts_voice = "🇮🇳 Indian English"  # default, won't be used if audio is uploaded
         
         # 2. Script Input
         script_text = st.text_area(
@@ -267,28 +287,36 @@ with tab_recap:
             
             if not is_demo and not active_key:
                 st.error("Please provide a Gemini API Key.")
-            elif not is_demo and not audio_file:
-                st.error("Please upload a voiceover audio file.")
             elif not script_text.strip():
                 st.error("Please paste your script.")
             else:
                 st.subheader("⚡ Generation Pipeline")
                 
                 # Setup audio path
-                if is_demo:
-                    audio_path = os.path.join(TEMP_DIR, "demo_voiceover.mp3")
-                    # Generate voiceover using gTTS dynamically
+                if is_demo or audio_file is None:
+                    # No audio uploaded — auto-generate TTS based on selected accent
+                    audio_path = os.path.join(TEMP_DIR, "auto_voiceover.mp3")
                     try:
                         from gtts import gTTS
-                        st.write("🔊 **Synthesizing demo voiceover using gTTS...**")
-                        tts = gTTS(text=script_text, lang='en')
+                        # Map UI selection to gTTS parameters
+                        _tts_configs = {
+                            "🇮🇳 Indian English":             {"lang": "en", "tld": "co.in"},
+                            "🇮🇳 Hinglish (Roman script)":   {"lang": "en", "tld": "co.in"},  # best gTTS approximation for Roman Hinglish
+                            "🇮🇳 Hindi (Devanagari script)": {"lang": "hi", "tld": "com"},
+                        }
+                        cfg = _tts_configs.get(tts_voice, {"lang": "en", "tld": "co.in"})
+                        accent_label = tts_voice if not is_demo else "🇮🇳 Indian English"
+                        st.info(f"**Auto-generating voiceover — {accent_label}...**")
+                        # TODO: Replace gTTS with custom voice model here
+                        # e.g. tts = CustomVoiceModel(voice_id="your_voice").generate(script_text)
+                        tts = gTTS(text=script_text, **cfg)
                         tts.save(audio_path)
-                        st.info("Demo voiceover synthesized successfully.")
+                        st.success(f"✅ Voiceover generated ({accent_label}).")
                     except Exception as e:
-                        st.error(f"Error generating demo audio with gTTS: {e}")
+                        st.error(f"Error generating audio with gTTS: {e}")
                         st.stop()
                 else:
-                    # Save uploaded audio file to temp directory
+                    # Use uploaded audio file
                     audio_path = os.path.join(TEMP_DIR, audio_file.name)
                     with open(audio_path, "wb") as f:
                         f.write(audio_file.getbuffer())

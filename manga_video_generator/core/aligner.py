@@ -23,8 +23,8 @@ def align_audio_segments(audio_path, scenes):
     # Load Whisper base model
     model = whisper.load_model("base", device=device)
     
-    # Transcribe audio file
-    result = model.transcribe(audio_path)
+    # Transcribe audio file with word-level timestamps for accurate per-word timing
+    result = model.transcribe(audio_path, word_timestamps=True)
     whisper_segments = result.get("segments", [])
     
     # Calculate total duration of audio
@@ -54,19 +54,29 @@ def align_audio_segments(audio_path, scenes):
         transcribed_word_times = []
         
         for seg in whisper_segments:
-            seg_text = seg['text']
-            seg_start = seg['start']
-            seg_end = seg['end']
-            words = seg_text.split()
-            if not words:
-                continue
-            duration = seg_end - seg_start
-            step = duration / len(words)
-            for j, w in enumerate(words):
-                cleaned = clean_word(w)
-                if cleaned:
-                    transcribed_words.append(cleaned)
-                    transcribed_word_times.append(seg_start + j * step)
+            words_data = seg.get('words', [])
+            if words_data:
+                # Use Whisper's DTW-aligned per-word timestamps (accurate)
+                for wd in words_data:
+                    cleaned = clean_word(wd.get('word', ''))
+                    if cleaned:
+                        transcribed_words.append(cleaned)
+                        transcribed_word_times.append(wd['start'])
+            else:
+                # Fallback: distribute words evenly within segment
+                seg_text = seg['text']
+                seg_start = seg['start']
+                seg_end = seg['end']
+                words = seg_text.split()
+                if not words:
+                    continue
+                duration = seg_end - seg_start
+                step = duration / len(words)
+                for j, w in enumerate(words):
+                    cleaned = clean_word(w)
+                    if cleaned:
+                        transcribed_words.append(cleaned)
+                        transcribed_word_times.append(seg_start + j * step)
                     
         # 3. Extract words with scene indices from scenes
         script_words = []
@@ -115,8 +125,14 @@ def align_audio_segments(audio_path, scenes):
             if times_prev and times_curr:
                 last_prev = max(times_prev)
                 first_curr = min(times_curr)
-                # Split at the midpoint between the end of prev and start of current
-                boundaries[i] = (last_prev + first_curr) / 2.0
+                if last_prev < first_curr:
+                    # Normal: split at midpoint between end of prev and start of current
+                    boundaries[i] = (last_prev + first_curr) / 2.0
+                else:
+                    # Timestamps cross — a common word in scene i-1 was matched to a
+                    # late transcript position, inflating scene i-1's duration.
+                    # Fall back to the proportional baseline.
+                    boundaries[i] = default_b
             elif times_prev:
                 boundaries[i] = max(times_prev)
             elif times_curr:
