@@ -58,9 +58,22 @@ def get_image_to_video_pipeline(model_id: str):
     """
     Loads and caches the image-to-video pipeline with CPU offloading and VAE optimisations.
     """
+    import psutil
+    if _is_large_i2v_model(model_id):
+        available_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
+        if available_ram_gb < 28:
+            raise RuntimeError(
+                f"\u274c Insufficient RAM: {available_ram_gb:.1f} GB available, "
+                f"but {model_id} requires at least 28 GB of free RAM. "
+                "Please select a smaller model (e.g. CogVideoX-5b-I2V or LTX-Video)."
+            )
     clear_vram()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     PipelineClass, load_kwargs = _resolve_i2v_pipeline(model_id)
+
+    # Pre-download the model with percentage progress bar
+    from core.downloader import check_and_download_model
+    check_and_download_model(model_id, variant=load_kwargs.get("variant"))
 
     with st.spinner(f"⏳ Loading `{model_id}` (first run downloads weights)..."):
         pipe = PipelineClass.from_pretrained(model_id, **load_kwargs)

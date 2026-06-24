@@ -61,12 +61,40 @@ def get_text_to_video_pipeline(model_id: str):
     Loads and caches the appropriate text-to-video pipeline for the given model.
     CPU offloading and VAE tiling/slicing are applied automatically.
     """
+    import psutil
+    if _is_large_model(model_id):
+        available_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
+        if available_ram_gb < 28:
+            raise RuntimeError(
+                f"\u274c Insufficient RAM: {available_ram_gb:.1f} GB available, "
+                f"but {model_id} requires at least 28 GB of free RAM. "
+                "Please select a smaller model (e.g. Wan2.1-T2V-1.3B or LTX-Video)."
+            )
     clear_vram()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     PipelineClass, load_kwargs, _ = _resolve_pipeline(model_id)
 
+    # Pre-download the model with percentage progress bar
+    from core.downloader import check_and_download_model
+    check_and_download_model(model_id)
+
     with st.spinner(f"⏳ Loading `{model_id}` (first run downloads weights)..."):
-        pipe = PipelineClass.from_pretrained(model_id, **load_kwargs)
+        mid_lower = model_id.lower()
+        # Wan requires VAE in float32 for quality; load separately then inject
+        if "wan" in mid_lower and "i2v" not in mid_lower:
+            from diffusers import AutoencoderKLWan, WanPipeline
+            from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+            vae = AutoencoderKLWan.from_pretrained(model_id, subfolder="vae", torch_dtype=torch.float32)
+            pipe = WanPipeline.from_pretrained(
+                model_id, vae=vae,
+                torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32
+            )
+            # flow_shift=3.0 for 480P, 5.0 for 720P
+            pipe.scheduler = UniPCMultistepScheduler.from_config(
+                pipe.scheduler.config, flow_shift=3.0
+            )
+        else:
+            pipe = PipelineClass.from_pretrained(model_id, **load_kwargs)
 
         if device == "cuda":
             # 14B+ models need sequential offload (slower but allows any model size on 8 GB VRAM)

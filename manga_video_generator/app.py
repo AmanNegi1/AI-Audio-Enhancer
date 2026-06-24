@@ -781,20 +781,29 @@ with tab_chat:
                     reply = "⚠️ Please provide a Gemini API Key in the configuration panel."
                 else:
                     try:
-                        import google.generativeai as genai
-                        genai.configure(api_key=chat_gemini_key.strip())
-                        if st.session_state["gemini_chat"] is None:
-                            model_obj = genai.GenerativeModel(
-                                model_name=chat_model,
-                                system_instruction=system_prompt.strip() or None,
-                            )
-                            history_seed = [
-                                {"role": m["role"], "parts": [m["text"]]}
-                                for m in st.session_state["chat_history"][:-1]
-                            ]
-                            st.session_state["gemini_chat"] = model_obj.start_chat(history=history_seed)
-                        response = st.session_state["gemini_chat"].send_message(user_input)
-                        reply = response.text
+                        from google import genai as _genai
+                        from google.genai import types as _gtypes
+                        _client = _genai.Client(api_key=chat_gemini_key.strip())
+                        # Build conversation history for the new SDK
+                        _contents = []
+                        if system_prompt.strip():
+                            _sys = system_prompt.strip()
+                        else:
+                            _sys = None
+                        for m in st.session_state["chat_history"][:-1]:
+                            _role = "user" if m["role"] == "user" else "model"
+                            _contents.append(_gtypes.Content(role=_role, parts=[_gtypes.Part(text=m["text"])]))
+                        # Add the current user message
+                        _contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part(text=user_input)]))
+                        _cfg = _gtypes.GenerateContentConfig(system_instruction=_sys) if _sys else None
+                        _resp = _client.models.generate_content(
+                            model=chat_model,
+                            contents=_contents,
+                            config=_cfg,
+                        )
+                        reply = _resp.text
+                        # Store the updated chat client in session (reuse for next turn)
+                        st.session_state["gemini_chat"] = _client
                     except Exception as e:
                         reply = f"⚠️ Gemini error: {e}"
 
@@ -816,12 +825,11 @@ with tab_txt2vid:
 
         # ── Model selection ────────────────────────────────────────────
         T2V_MODELS = [
-            "Lightricks/LTX-Video              ⭐ RECOMMENDED — fastest, 768×512, 24fps, ~5.7 GB",
-            "genmo/mochi-1-preview              — fluid motion specialist, 848×480, 30fps, ~10 GB",
+            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers      ⭐ RECOMMENDED — SOTA lightweight, 480p, ~2.6 GB",
             "THUDM/CogVideoX-2b                — high quality, 720×480, 8fps, ~4.5 GB",
             "THUDM/CogVideoX-5b                — best quality, 720×480, 8fps, ~9 GB (heavy offload)",
-            "Wan-AI/Wan2.1-T2V-1.3B            — SOTA lightweight, 480p, ~2.6 GB",
-            "Wan-AI/Wan2.1-T2V-14B             — SOTA highest quality, 480p, ~28 GB (sequential offload)",
+            "genmo/mochi-1-preview              — fluid motion specialist, 848×480, 30fps, ~10 GB",
+            "Wan-AI/Wan2.1-T2V-14B-Diffusers        — SOTA highest quality, 480p, ~28 GB (sequential offload)",
             "cerspense/zeroscope_v2_576w        — legacy, 576×320, ~5 GB",
             "damo-vilab/text-to-video-ms-1.7b   — legacy draft/test, 256×256, ~3 GB",
             "Custom Model ID (Hugging Face)",
@@ -837,7 +845,7 @@ with tab_txt2vid:
         if "Custom" in t2v_model_choice:
             t2v_model_id = st.text_input(
                 "Hugging Face Model ID",
-                value="Lightricks/LTX-Video",
+                value="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
                 key="t2v_custom_id"
             )
         else:
@@ -845,69 +853,60 @@ with tab_txt2vid:
 
         mid_lower = t2v_model_id.lower()
         # Per-model recommended defaults + strength note
-        if "ltx" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 25, 50, 3.0, 24
-            _def_w, _def_h = 768, 512
-            st.success(
-                "⭐ **LTX-Video** by Lightricks"
-                "💪 **Strength: Speed** — generates a clip in *seconds* on RTX 4060."
-                "📌 Resolution: 768×512 · 24fps · ~5.7 GB · Negative prompt: ✅"
-            )
-        elif "mochi" in mid_lower:
+        if "mochi" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 84, 64, 4.5, 30
             _def_w, _def_h = 848, 480
             st.info(
-                "🌊 **Mochi-1** by Genmo"
-                "💪 **Strength: Fluid Motion** — best-in-class physics, cloth, water, and human movement."
+                "🌊 **Mochi-1** by Genmo  \n"
+                "💪 **Strength: Fluid Motion** — best-in-class physics, cloth, water, and human movement.  \n"
                 "📌 848×480 · 30fps · ~10 GB · Width & height must be multiples of 32."
             )
         elif "cogvideox-5b" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 49, 50, 6.0, 8
             _def_w, _def_h = 720, 480
             st.info(
-                "🏆 **CogVideoX-5b** by THUDM"
-                "💪 **Strength: Best Overall Quality** — highest visual fidelity of the CogVideo family."
+                "🏆 **CogVideoX-5b** by THUDM  \n"
+                "💪 **Strength: Best Overall Quality** — highest visual fidelity of the CogVideo family.  \n"
                 "📌 720×480 · 8fps · ~9 GB · Uses heavy CPU offloading."
             )
         elif "cogvideox" in mid_lower or "cogvideo" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 49, 50, 6.0, 8
             _def_w, _def_h = 720, 480
             st.info(
-                "⚖️ **CogVideoX-2b** by THUDM  "
-                "💪 **Strength: Quality / Size Balance** — excellent quality at only 4.5 GB.  "
+                "⚖️ **CogVideoX-2b** by THUDM  \n"
+                "💪 **Strength: Quality / Size Balance** — excellent quality at only 4.5 GB.  \n"
                 "📌 720×480 · 8fps · ~4.5 GB · Negative prompt: ❌ (use 5b for that)"
             )
         elif "wan2.1-t2v-14b" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 81, 50, 5.0, 16
             _def_w, _def_h = 832, 480
             st.warning(
-                "👑 **Wan2.1-T2V-14B** by Alibaba  "
-                "💪 **Strength: Maximum Quality** — highest quality of any open-source video model.  "
+                "👑 **Wan2.1-T2V-14B** by Alibaba  \n"
+                "💪 **Strength: Maximum Quality** — highest quality of any open-source video model.  \n"
                 "⚠️ ~28 GB weights · sequential CPU offload · requires 32 GB+ system RAM · 10–30 min per video."
             )
         elif "wan" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 81, 50, 5.0, 16
             _def_w, _def_h = 832, 480
             st.success(
-                "✨ **Wan2.1-T2V-1.3B** by Alibaba  "
-                "💪 **Strength: SOTA Lightweight** — state-of-the-art quality packed into just 2.6 GB.  "
+                "✨ **Wan2.1-T2V-1.3B** by Alibaba  \n"
+                "💪 **Strength: SOTA Lightweight** — state-of-the-art quality packed into just 2.6 GB.  \n"
                 "📌 832×480 · 16fps · ~2.6 GB · Fast on RTX 4060."
             )
         elif "zeroscope" in mid_lower:
             _def_frames, _def_steps, _def_guidance, _def_fps = 16, 25, 9.0, 8
             _def_w, _def_h = 576, 320
             st.warning(
-                "🗓️ **ZeroScope V2 576w** (legacy 2023)  "
-                "💪 **Strength: Historical reference only** — lower quality than modern alternatives."
-
+                "🗓️ **ZeroScope V2 576w** (legacy 2023)  \n"
+                "💪 **Strength: Historical reference only** — lower quality than modern alternatives.  \n"
                 "📌 576×320 · ~5 GB · Supports negative prompts."
             )
         else:  # ModelScope
             _def_frames, _def_steps, _def_guidance, _def_fps = 16, 25, 9.0, 8
             _def_w, _def_h = 256, 256
             st.warning(
-                "🗓️ **ModelScope 1.7B** (legacy 2022)  "
-                "💪 **Strength: Fast draft / smoke test only** — 256×256 output, use LTX-Video for real results.  "
+                "🗓️ **ModelScope 1.7B** (legacy 2022)  \n"
+                "💪 **Strength: Fast draft / smoke test only** — 256×256 output.  \n"
                 "📌 256×256 · ~3 GB · No negative prompt support."
             )
 
@@ -950,6 +949,9 @@ with tab_txt2vid:
             if not t2v_prompt.strip():
                 st.error("Please enter a video prompt.")
             else:
+                active_hf_token = hf_token_main if hf_token_main else hf_token
+                if active_hf_token.strip():
+                    os.environ["HF_TOKEN"] = active_hf_token.strip()
                 t2v_output_path = os.path.join(OUTPUT_DIR, "text_to_video_output.mp4")
                 try:
                     with st.status("🎥 Generating video clip locally…", expanded=True) as t2v_status:
@@ -989,7 +991,6 @@ with tab_txt2vid:
 
 | Model | Size | 💪 Strength | Quality | Speed | Resolution |
 |---|---|---|---|---|---|
-| **LTX-Video** ⭐ | ~5.7 GB | ⚡ Speed | ★★★★ | Very Fast | 768×512 @ 24fps |
 | **Mochi-1** 🌊 | ~10 GB | 🌊 Fluid Motion | ★★★★★ | Medium | 848×480 @ 30fps |
 | CogVideoX-2b ⚖️ | ~4.5 GB | ⚖️ Quality / Size | ★★★★★ | Medium | 720×480 |
 | CogVideoX-5b 🏆 | ~9 GB | 🏆 Best Overall Quality | ★★★★★+ | Slow | 720×480 |
@@ -1017,9 +1018,8 @@ with tab_img2vid:
 
         I2V_MODELS = [
             "THUDM/CogVideoX-5b-I2V              ⭐ RECOMMENDED — best quality, text-guided, 720×480",
-            "Lightricks/LTX-Video                — fastest, text-guided, 768×512, 24fps",
-            "Wan-AI/Wan2.1-I2V-14B-480P          — SOTA Wan2.1 I2V, text-guided, 832×480, ~28 GB",
-            "Wan-AI/Wan2.1-I2V-14B-720P          — SOTA Wan2.1 I2V, text-guided, 1280×720, ~28 GB",
+            "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers    — SOTA Wan2.1 I2V, text-guided, 832×480, ~28 GB",
+            "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers    — SOTA Wan2.1 I2V, text-guided, 1280×720, ~28 GB",
             "stabilityai/stable-video-diffusion-img2vid-xt  — SVD-XT, motion-bucket control, 1024×576",
             "stabilityai/stable-video-diffusion-img2vid     — SVD standard, 14 frames",
             "Custom Model ID (Hugging Face)",
@@ -1043,14 +1043,11 @@ with tab_img2vid:
 
         i2v_mid_lower = i2v_model_id.lower()
         _is_cogvid_i2v = "cogvideo" in i2v_mid_lower
-        _is_ltx_i2v    = "ltx" in i2v_mid_lower
         _is_wan_i2v    = "wan" in i2v_mid_lower
         _is_svd        = "stable-video" in i2v_mid_lower
 
         if _is_cogvid_i2v:
             st.success("⭐ CogVideoX-5b-I2V — best open-source I2V. Accepts a text prompt to guide the animation direction.")
-        elif _is_ltx_i2v:
-            st.success("LTX-Video I2V — fastest option, also text-guided.")
         elif _is_wan_i2v:
             if "720p" in i2v_mid_lower:
                 st.warning(
@@ -1076,8 +1073,8 @@ with tab_img2vid:
             preview_img = _PIL_Image.open(i2v_upload).convert("RGB")
             st.image(preview_img, caption="Source Image Preview", use_container_width=True)
 
-        # Optional text prompt — CogVideoX, LTX, and Wan all support it
-        if _is_cogvid_i2v or _is_ltx_i2v or _is_wan_i2v:
+        # Optional text prompt — CogVideoX and Wan both support it
+        if _is_cogvid_i2v or _is_wan_i2v:
             i2v_prompt = st.text_area(
                 "Motion Prompt (optional — guides how the scene moves)",
                 value="Smooth cinematic camera motion, gentle ambient movement",
@@ -1088,9 +1085,9 @@ with tab_img2vid:
             i2v_prompt = ""
 
         # Frame / FPS defaults depend on model
-        _i2v_def_frames = 81 if _is_wan_i2v else (49 if (_is_cogvid_i2v or _is_ltx_i2v) else 25)
-        _i2v_def_fps    = 16 if _is_wan_i2v else (24 if _is_ltx_i2v else 8 if _is_cogvid_i2v else 7)
-        _i2v_max_frames = 81 if _is_wan_i2v else (49 if (_is_cogvid_i2v or _is_ltx_i2v) else 25)
+        _i2v_def_frames = 81 if _is_wan_i2v else (49 if _is_cogvid_i2v else 25)
+        _i2v_def_fps    = 16 if _is_wan_i2v else (8 if _is_cogvid_i2v else 7)
+        _i2v_max_frames = 81 if _is_wan_i2v else (49 if _is_cogvid_i2v else 25)
 
         col_i2v_p1, col_i2v_p2 = st.columns(2)
         with col_i2v_p1:
@@ -1140,6 +1137,9 @@ with tab_img2vid:
                 source_img = _PIL_Image.open(i2v_upload).convert("RGB")
                 i2v_output_path = os.path.join(OUTPUT_DIR, "image_to_video_output.mp4")
 
+                active_hf_token = hf_token_main if hf_token_main else hf_token
+                if active_hf_token.strip():
+                    os.environ["HF_TOKEN"] = active_hf_token.strip()
                 try:
                     with st.status("🎥 Animating image locally…", expanded=True) as i2v_status:
                         st.write(f"Model: `{i2v_model_id}`")
@@ -1179,7 +1179,6 @@ with tab_img2vid:
 | Model | Size | Quality | Speed | Resolution | Text prompt? |
 |---|---|---|---|---|---|
 | **CogVideoX-5b-I2V** ⭐ | ~9 GB | ★★★★★ | Medium | 720×480 | Yes |
-| LTX-Video I2V | ~5.7 GB | ★★★★ | Very Fast | 768×512 | Yes |
 | **Wan2.1-I2V-14B-480P** | ~28 GB | ★★★★★+ | Very Slow¹ | 832×480 | Yes |
 | **Wan2.1-I2V-14B-720P** | ~28 GB | ★★★★★+ | Very Slow¹ | 1280×720 | Yes |
 | SVD-XT | ~9 GB | ★★★ | Medium | 1024×576 | No |

@@ -1,16 +1,14 @@
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 def parse_script_to_prompts(script_text, api_key):
     """
     Splits the script into logical scene beats and writes descriptive text-to-image prompts.
     Returns a list of dicts: [{'text_segment': str, 'image_prompt': str}]
     """
-    genai.configure(api_key=api_key)
-    
-    # We use gemini-1.5-flash as it is fast and efficient
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
+    client = genai.Client(api_key=api_key)
+
     system_instruction = (
         "You are an expert anime storyboard director. Your task is to analyze a video script, "
         "split it into a sequence of logical narrative beats (scenes), and write detailed image generation prompts "
@@ -24,15 +22,17 @@ def parse_script_to_prompts(script_text, api_key):
         "(e.g., 'a boy with spiky black hair and a scar on his face, wearing a dark coat').\n"
         "Do not include any markdown format tags like ```json or other text in your response, output raw JSON only."
     )
-    
+
     prompt = f"Analyze the following script and break it down into sequential scenes:\n\n{script_text}"
-    
+
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"},
-            safety_settings=[],
-            system_instruction=system_instruction
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+            ),
         )
         
         # Parse JSON output

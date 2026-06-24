@@ -44,6 +44,12 @@ def get_custom_pipeline(model_id):
             ctx = DummyCtx()
             
         with ctx:
+            # Pre-download the model with percentage progress bar
+            from core.downloader import check_and_download_model
+            use_fp16 = ("stable-diffusion-xl" in model_id.lower() or "sdxl" in model_id.lower()) and device == "cuda" and not is_z_image
+            variant = "fp16" if use_fp16 else None
+            check_and_download_model(model_id, variant=variant)
+
             if is_z_image:
                 pipeline = DiffusionPipeline.from_pretrained(
                     model_id,
@@ -58,7 +64,8 @@ def get_custom_pipeline(model_id):
                     model_id,
                     torch_dtype=dtype,
                     use_safetensors=True,
-                    low_cpu_mem_usage=True
+                    low_cpu_mem_usage=True,
+                    variant=variant
                 )
             
             if device == "cuda":
@@ -66,8 +73,9 @@ def get_custom_pipeline(model_id):
                     # device_map="balanced" handles offloading/placement automatically
                     pass
                 else:
-                    pipeline = pipeline.to("cuda")
-                    pipeline.enable_attention_slicing()
+                    pipeline.enable_model_cpu_offload()
+                    if hasattr(pipeline, "enable_attention_slicing"):
+                        pipeline.enable_attention_slicing()
             else:
                 if not is_z_image:
                     pipeline = pipeline.to("cpu")
