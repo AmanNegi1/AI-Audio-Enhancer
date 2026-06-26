@@ -27,13 +27,18 @@ import shutil
 from PIL import Image
 
 # Import core modules
-from core.parser import parse_script_to_prompts
+from core.parser import parse_script_to_prompts, refine_scene_pacing
 from core.aligner import align_audio_segments
 from core.generator import generate_scene_image
 from core.custom_generator import generate_custom_image
 from core.assembler import assemble_video
+from core.audio_first_recaper import create_audio_first_scenes
+from core.panel_remixer import create_panel_remix_scenes
 from core.text_to_video import generate_text_to_video
 from core.image_to_video import generate_image_to_video
+from tabs_tools import render_txt2img, render_chat, render_txt2vid, render_img2vid
+from core.gemini_manager import GeminiKeyManager
+from core.openai_manager import OpenAIKeyManager
 
 # Demo Sample Constants
 DEMO_SCRIPT = (
@@ -152,12 +157,83 @@ with st.sidebar:
             
     st.markdown("---")
     st.subheader("🔑 API Setup")
-    gemini_key = st.text_input(
-        "Gemini API Key", 
-        value=os.environ.get("GEMINI_API_KEY", ""),
+    
+    # Initialize key manager
+    GeminiKeyManager.initialize()
+    
+    custom_val = st.session_state.get("custom_gemini_key", os.environ.get("GEMINI_API_KEY", ""))
+    gemini_key_input = st.text_input(
+        "Gemini API Key (Custom)", 
+        value=custom_val,
         type="password",
-        help="Get a free API key from Google AI Studio (aistudio.google.com)"
+        help="Provide your own Gemini API key. If it exceeds quota, the system will fall back to backup keys."
     )
+    
+    # Sync with key manager
+    GeminiKeyManager.set_custom_key(gemini_key_input)
+    
+    # Resolve active key
+    gemini_key = GeminiKeyManager.get_active_key()
+    
+    # Display backup key list and statuses
+    st.caption("🔄 **Gemini API Key Rotation Pool:**")
+    statuses = st.session_state["gemini_keys_status"]
+    active_idx = st.session_state.get("current_key_index", 0)
+    
+    # Custom key status
+    custom_status = st.session_state.get("custom_gemini_key_status", "Active")
+    if gemini_key_input.strip():
+        c_icon = "🟢" if custom_status == "Active" else "🔴"
+        c_label = "Active (Custom)" if custom_status == "Active" else "Exhausted"
+        st.markdown(f"{c_icon} **Custom Key:** `{gemini_key_input[:6]}...{gemini_key_input[-4:]}` ({c_label})")
+        
+    for idx, k in enumerate(statuses):
+        is_active = (idx == active_idx) and (not gemini_key_input.strip() or custom_status != "Active")
+        status_icon = "🟢" if k["status"] == "Active" else "🔴"
+        active_badge = " ⚡ *[Current]*" if is_active else ""
+        masked_key = f"`{k['key'][:6]}...{k['key'][-4:]}`"
+        st.markdown(f"{status_icon} **{k['owner']}**: {masked_key}{active_badge}")
+
+    st.markdown("---")
+    st.caption("🔑 **OpenAI (ChatGPT) API Key Configuration**")
+    
+    # Initialize OpenAI key manager
+    OpenAIKeyManager.initialize()
+    
+    custom_openai_val = st.session_state.get("custom_openai_key", os.environ.get("OPENAI_API_KEY", ""))
+    openai_key_input = st.text_input(
+        "OpenAI API Key (Custom)", 
+        value=custom_openai_val,
+        type="password",
+        help="Provide your own OpenAI API key. If it exceeds quota, the system will fall back to backup keys."
+    )
+    
+    # Sync with key manager
+    OpenAIKeyManager.set_custom_key(openai_key_input)
+    
+    # Resolve active key
+    openai_key = OpenAIKeyManager.get_active_key()
+    
+    # Display backup key list and statuses
+    st.caption("🔄 **OpenAI API Key Rotation Pool:**")
+    openai_statuses = st.session_state["openai_keys_status"]
+    openai_active_idx = st.session_state.get("openai_current_key_index", 0)
+    
+    # Custom key status
+    custom_openai_status = st.session_state.get("custom_openai_key_status", "Active")
+    if openai_key_input.strip():
+        c_openai_icon = "🟢" if custom_openai_status == "Active" else "🔴"
+        c_openai_label = "Active (Custom)" if custom_openai_status == "Active" else "Exhausted"
+        st.markdown(f"{c_openai_icon} **Custom Key:** `{openai_key_input[:6]}...{openai_key_input[-4:]}` ({c_openai_label})")
+        
+    for idx, k in enumerate(openai_statuses):
+        is_openai_active = (idx == openai_active_idx) and (not openai_key_input.strip() or custom_openai_status != "Active")
+        status_openai_icon = "🟢" if k["status"] == "Active" else "🔴"
+        active_openai_badge = " ⚡ *[Current]*" if is_openai_active else ""
+        masked_openai_key = f"`{k['key'][:6]}...{k['key'][-4:]}`"
+        st.markdown(f"{status_openai_icon} **{k['owner']}**: {masked_openai_key}{active_openai_badge}")
+
+    st.markdown("---")
     hf_token = st.text_input(
         "Hugging Face Token (Optional)",
         value=os.environ.get("HF_TOKEN", ""),
@@ -184,8 +260,10 @@ with st.sidebar:
 # ---------------- Main Dashboard ----------------
 st.title("🚀 AI Creative Studio & Recap Engine")
 
-tab_recap, tab_txt2img, tab_chat, tab_txt2vid, tab_img2vid = st.tabs([
+tab_recap, tab_audio_first, tab_panel_remix, tab_txt2img, tab_chat, tab_txt2vid, tab_img2vid = st.tabs([
     "🎬 Manga Video Recap Generator",
+    "🎧 Audio-First YouTube Studio",
+    "🧩 Panel Remix Studio",
     "🎨 Text to Image",
     "💬 AI Conversation",
     "🎥 Text to Video",
@@ -222,8 +300,8 @@ with tab_recap:
         if st.session_state.get("use_demo_audio", False):
             st.info("🔊 **Demo Voiceover Active** (Using auto-generated audio)")
             uploaded_audio = st.file_uploader(
-                "Replace Demo Voiceover with custom Audio (.mp3, .wav, .m4a)", 
-                type=["mp3", "wav", "m4a"]
+                "Replace Demo Voiceover with custom Audio (.mp3, .wav, .m4a, .mpeg)", 
+                type=["mp3", "wav", "m4a", "mpeg"]
             )
             if uploaded_audio is not None:
                 st.session_state["use_demo_audio"] = False
@@ -234,8 +312,8 @@ with tab_recap:
                 audio_file = None
         else:
             audio_file = st.file_uploader(
-                "Upload Voiceover Audio (.mp3, .wav, .m4a) — optional, auto-generates voice if skipped", 
-                type=["mp3", "wav", "m4a"]
+                "Upload Voiceover Audio (.mp3, .wav, .m4a, .mpeg) — optional, auto-generates voice if skipped", 
+                type=["mp3", "wav", "m4a", "mpeg"]
             )
         
         # TTS Voice selector (shown only when no audio is uploaded)
@@ -272,6 +350,30 @@ with tab_recap:
                 "watercolor manga sketch, soft pastel colors, hand-drawn paper texture, highly expressive lines"
             ]
         )
+
+        image_backend_choice = st.selectbox(
+            "Image generation model for video",
+            options=[
+                "Local GPU - segmind/SSD-1B",
+                "Gemini API - Imagen 3",
+                "Local GPU - Custom Hugging Face model",
+            ],
+            key="recap_image_backend_choice"
+        )
+        if image_backend_choice == "Gemini API - Imagen 3":
+            recap_image_backend = "gemini"
+            recap_image_model_id = "imagen-4.0-generate-001"
+            st.caption("Uses your Gemini API key for cloud image generation. Good fallback when local SDXL images are weak.")
+        elif image_backend_choice == "Local GPU - Custom Hugging Face model":
+            recap_image_backend = "local"
+            recap_image_model_id = st.text_input(
+                "Custom Hugging Face image model ID",
+                value="segmind/SSD-1B",
+                key="recap_custom_image_model_id"
+            )
+        else:
+            recap_image_backend = "local"
+            recap_image_model_id = "segmind/SSD-1B"
         
         # 4. Draft Mode Toggle
         draft_mode = st.checkbox("⚡ Fast Draft Mode (Instant testing - bypasses 2.5 GB model download/loading)", value=False)
@@ -339,6 +441,7 @@ with tab_recap:
                         if is_demo and st.session_state.get("use_demo_scenes", False) and not active_key:
                             import copy
                             scenes = copy.deepcopy(DEMO_SCENES)
+                            scenes = refine_scene_pacing(scenes)
                             st.info("Bypassed Gemini script parser (using pre-defined Kagurabachi scene prompts).")
                         else:
                             scenes = parse_script_to_prompts(script_text, active_key)
@@ -364,7 +467,8 @@ with tab_recap:
                         
                 # Step 3: Local Image Generation
                 with status_container:
-                    st.write("🎨 **Step 3:** Generating original scenes locally on GPU (RTX 4060)...")
+                    selected_model_label = "Gemini Imagen 3" if recap_image_backend == "gemini" else recap_image_model_id
+                    st.write(f"🎨 **Step 3:** Generating original scenes with {selected_model_label}...")
                     progress_bar = st.progress(0.0)
                     
                     try:
@@ -377,7 +481,14 @@ with tab_recap:
                             st.write(f"🖌️ *Generating Scene #{idx+1} prompt:* `{prompt[:90]}...`")
                             
                             # Call local generator
-                            img = generate_scene_image(prompt, style_preset, mock_mode=draft_mode)
+                            img = generate_scene_image(
+                                prompt,
+                                style_preset,
+                                mock_mode=draft_mode,
+                                image_backend=recap_image_backend,
+                                model_id=recap_image_model_id,
+                                api_key=active_key,
+                            )
                             img.save(image_path)
                             
                             scene['image_path'] = image_path
@@ -432,756 +543,496 @@ with tab_recap:
                         st.image(image_path, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
-with tab_txt2img:
-    st.header("🎨 Standalone Text to Image Generator")
-    st.write("Generate high-quality artwork using local open-source models like Stable Diffusion XL or Z-Image-Turbo.")
-    
-    col_t2i_in, col_t2i_res = st.columns([1, 1])
-    
-    with col_t2i_in:
+with tab_audio_first:
+    st.write("Build YouTube-ready visuals from the real voiceover timing first, then generate images and keyframed edits from those audio beats.")
+
+    col_audio_first_in, col_audio_first_out = st.columns([1, 1])
+
+    with col_audio_first_in:
         st.markdown("<div class='status-card'>", unsafe_allow_html=True)
-        st.subheader("📝 Inputs & Configuration")
-        
-        t2i_model_choice = st.selectbox(
-            "Select AI Image Model",
+        st.subheader("🎧 Audio-First YouTube Inputs")
+
+        audio_first_key = st.text_input(
+            "Gemini API Key (optional for better shot prompts)",
+            value=gemini_key if gemini_key else os.environ.get("GEMINI_API_KEY", ""),
+            type="password",
+            key="gemini_key_audio_first"
+        )
+        audio_first_file = st.file_uploader(
+            "Upload voiceover audio (.mp3, .wav, .m4a, .mpeg)",
+            type=["mp3", "wav", "m4a", "mpeg"],
+            key="audio_first_voiceover"
+        )
+        audio_first_content_type = st.selectbox(
+            "Video content type",
             options=[
-                "segmind/SSD-1B (Fast, cached, 1.3B parameters)",
-                "Tongyi-MAI/Z-Image-Turbo (Distilled 6B parameter S3-DiT)",
-                "stabilityai/sdxl-turbo (Instant 1-step SDXL)",
-                "Custom Model ID (Hugging Face Repository Path)"
-            ],
-            index=0
-        )
-        
-        if "Custom Model" in t2i_model_choice:
-            t2i_model_id = st.text_input(
-                "Enter Hugging Face Model ID",
-                value="stabilityai/stable-diffusion-xl-base-1.0",
-                placeholder="e.g., stabilityai/stable-diffusion-xl-base-1.0"
-            )
-        elif "SSD-1B" in t2i_model_choice:
-            t2i_model_id = "segmind/SSD-1B"
-        elif "Z-Image-Turbo" in t2i_model_choice:
-            t2i_model_id = "Tongyi-MAI/Z-Image-Turbo"
-            st.warning("⚠️ **Z-Image-Turbo is a 6B parameter model (~12 GB of weights)**. Loading it requires at least 20-24 GB of system RAM to prevent process crashes. If your laptop has 16 GB of RAM, this will likely crash the local server.")
-        else:
-            t2i_model_id = "stabilityai/sdxl-turbo"
-            
-        is_turbo = "turbo" in t2i_model_id.lower() or "Turbo" in t2i_model_id
-        is_z_image = "Z-Image" in t2i_model_id or "Tongyi-MAI" in t2i_model_id
-        
-        default_steps = 8 if is_turbo else 20
-        default_guidance = 0.0 if is_z_image else (1.5 if is_turbo else 7.5)
-        
-        t2i_prompt = st.text_area(
-            "Prompt / Image Description",
-            value="anime style, portrait of a warrior boy with spiky hair, wielding a glowing katana sword, dramatic lighting, highly detailed",
-            height=120
-        )
-        
-        t2i_negative = st.text_area(
-            "Negative Prompt",
-            value="deformed, blurry, text, watermark, low quality, bad anatomy",
-            disabled=is_turbo,
-            height=80
-        )
-        
-        col_t2i_params1, col_t2i_params2 = st.columns(2)
-        with col_t2i_params1:
-            t2i_steps = st.slider("Inference Steps", min_value=1, max_value=50, value=default_steps)
-        with col_t2i_params2:
-            t2i_guidance = st.slider("Guidance Scale (CFG)", min_value=0.0, max_value=15.0, value=default_guidance, step=0.5)
-            
-        t2i_aspect = st.selectbox(
-            "Aspect Ratio",
-            options=["16:9 (Landscape) - 1024x576", "1:1 (Square) - 1024x1024", "9:16 (Portrait) - 576x1024"],
-            index=0
-        )
-        
-        if "16:9" in t2i_aspect:
-            t2i_w, t2i_h = 1024, 576
-        elif "1:1" in t2i_aspect:
-            t2i_w, t2i_h = 1024, 1024
-        else:
-            t2i_w, t2i_h = 576, 1024
-            
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        t2i_generate_btn = st.button("Generate Single Image 🎨")
-        
-    with col_t2i_res:
-        if t2i_generate_btn:
-            if not t2i_prompt.strip():
-                st.error("Please enter an image prompt description.")
-            else:
-                st.subheader("⚡ Generation Progress")
-                
-                active_hf_token = hf_token_main if hf_token_main else hf_token
-                if active_hf_token.strip():
-                    os.environ["HF_TOKEN"] = active_hf_token.strip()
-                
-                try:
-                    with st.status("🎨 Generating your image locally...", expanded=True) as status:
-                        st.write("Loading model pipeline into memory (applying VRAM safety optimizations)...")
-                        img = generate_custom_image(
-                            prompt=t2i_prompt,
-                            model_id=t2i_model_id,
-                            negative_prompt=t2i_negative if not is_turbo else "",
-                            num_inference_steps=t2i_steps,
-                            guidance_scale=t2i_guidance,
-                            width=t2i_w,
-                            height=t2i_h
-                        )
-                        status.update(label="🎨 Generation Succeeded!", state="complete")
-                    
-                    st.subheader("🎉 Generated Image Output")
-                    st.image(img, use_container_width=True)
-                    
-                    t2i_temp_path = os.path.join(TEMP_DIR, "t2i_output.png")
-                    img.save(t2i_temp_path)
-                    
-                    with open(t2i_temp_path, "rb") as f:
-                        st.download_button(
-                            label="Download PNG Image 📥",
-                            data=f,
-                            file_name="generated_art.png",
-                            mime="image/png"
-                        )
-                except Exception as e:
-                    st.error(f"Image generation failed: {e}")
-        else:
-            st.info("Configure your prompt on the left, then click 'Generate Single Image' to run.")
-
-# =====================================================================
-# TAB 3 – AI Conversation
-# =====================================================================
-with tab_chat:
-    st.header("💬 AI Conversation")
-    st.write("Chat with cloud or fully local open-source models. Local models run entirely on your machine — no API key, no content filters.")
-
-    # ── Session state ──────────────────────────────────────────────────
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []   # {"role": "user"|"model", "text": str}
-    if "gemini_chat" not in st.session_state:
-        st.session_state["gemini_chat"] = None
-    if "ollama_models_cache" not in st.session_state:
-        st.session_state["ollama_models_cache"] = []
-
-    col_chat_cfg, col_chat_window = st.columns([1, 2])
-
-    # ── Preset uncensored Ollama models ───────────────────────────────
-    OLLAMA_PRESET_MODELS = [
-        "dolphin-mistral          (uncensored Mistral 7B — recommended)",
-        "dolphin3                 (uncensored Dolphin 3 — latest)",
-        "dolphin-llama3:8b        (uncensored LLaMA 3 8B)",
-        "nous-hermes2             (Nous Hermes 2 — creative, unrestricted)",
-        "openhermes               (OpenHermes 2.5 Mistral fine-tune)",
-        "wizardlm2:7b             (WizardLM 2 7B)",
-        "mistral                  (Mistral 7B — lightly filtered)",
-        "llama3                   (Meta LLaMA 3 8B — lightly filtered)",
-        "gemma2:9b                (Google Gemma 2 9B)",
-        "phi3:mini                (Microsoft Phi-3 Mini 3.8B — fast)",
-        "Custom — type below",
-    ]
-
-    with col_chat_cfg:
-        st.markdown("<div class='status-card'>", unsafe_allow_html=True)
-        st.subheader("⚙️ Configuration")
-
-        # ── Backend selector ──────────────────────────────────────────
-        chat_backend = st.radio(
-            "Chat Backend",
-            options=[
-                "🏠 Ollama  (local, no API key, no filters)",
-                "🔌 Custom OpenAI-Compatible  (LM Studio / text-gen-webui / vLLM)",
-                "☁️ Gemini  (cloud)",
+                "Anime / Manga Recap",
+                "Education / Explainer",
+                "History / Documentary",
+                "Tech / Business",
+                "Motivation / Self Improvement",
+                "General YouTube",
             ],
             index=0,
-            key="chat_backend",
-            help="Ollama and Custom run models 100 % locally on your GPU/CPU."
+            key="audio_first_content_type"
         )
-
-        st.markdown("---")
-
-        # ── Backend-specific fields ───────────────────────────────────
-        if "Ollama" in chat_backend:
-            st.caption("Ollama must be running locally (`ollama serve`). Install from [ollama.com](https://ollama.com).")
-
-            ollama_host = st.text_input(
-                "Ollama Host",
-                value="http://localhost:11434",
-                key="ollama_host",
-                help="Default Ollama endpoint. Change if running on a remote machine."
-            )
-
-            # Auto-detect installed models
-            col_detect, _ = st.columns([1, 1])
-            with col_detect:
-                if st.button("🔍 Detect Installed Models", key="detect_ollama"):
-                    import requests as _req
-                    try:
-                        resp = _req.get(f"{ollama_host.rstrip('/')}/api/tags", timeout=5)
-                        if resp.ok:
-                            names = [m["name"] for m in resp.json().get("models", [])]
-                            st.session_state["ollama_models_cache"] = names
-                            if names:
-                                st.success(f"Found {len(names)} installed model(s).")
-                            else:
-                                st.warning("Ollama is running but no models installed yet. Run `ollama pull dolphin-mistral` in a terminal.")
-                        else:
-                            st.error(f"Ollama responded with status {resp.status_code}.")
-                    except Exception as _e:
-                        st.error(f"Cannot reach Ollama at `{ollama_host}`. Is it running? ({_e})")
-
-            preset_choice = st.selectbox(
-                "Select Model",
-                options=OLLAMA_PRESET_MODELS + (
-                    ["── Installed on this machine ──"] + st.session_state["ollama_models_cache"]
-                    if st.session_state["ollama_models_cache"] else []
-                ),
-                index=0,
-                key="ollama_preset"
-            )
-
-            # Resolve actual model ID
-            if "Custom" in preset_choice or "──" in preset_choice:
-                ollama_model_id = st.text_input(
-                    "Model ID (as shown by `ollama list`)",
-                    value="dolphin-mistral",
-                    key="ollama_custom_model"
-                )
-            elif preset_choice in st.session_state["ollama_models_cache"]:
-                ollama_model_id = preset_choice
-                st.info(f"Using installed model: `{ollama_model_id}`")
-            else:
-                # Strip the description suffix after first two spaces
-                ollama_model_id = preset_choice.split()[0]
-                st.info(f"Pull command if not installed: `ollama pull {ollama_model_id}`")
-
-            chat_gemini_key = ""   # not used for Ollama
-
-        elif "Custom" in chat_backend:
-            st.caption("Use any server exposing an OpenAI-compatible `/chat/completions` endpoint (LM Studio, text-gen-webui, vLLM, etc.).")
-
-            custom_base_url = st.text_input(
-                "Base URL",
-                value="http://localhost:1234/v1",
-                key="custom_base_url",
-                help="LM Studio default: http://localhost:1234/v1  |  text-gen-webui: http://localhost:5000/v1"
-            )
-            custom_model_id = st.text_input(
-                "Model ID",
-                value="local-model",
-                key="custom_model_id",
-                help="The model identifier expected by the server. For LM Studio this is usually 'local-model'."
-            )
-            custom_api_key = st.text_input(
-                "API Key (leave blank if not required)",
-                value="",
-                type="password",
-                key="custom_api_key"
-            )
-            chat_gemini_key = ""   # not used for custom
-
-        else:  # Gemini
-            chat_gemini_key = st.text_input(
-                "Gemini API Key",
-                value=gemini_key if gemini_key else os.environ.get("GEMINI_API_KEY", ""),
-                type="password",
-                key="gemini_key_chat",
-                help="Required for Gemini — get a free key at aistudio.google.com."
-            )
-            chat_model = st.selectbox(
-                "Gemini Model",
-                options=["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"],
-                index=0,
-                key="chat_gemini_model"
-            )
-
-        st.markdown("---")
-
-        # ── System prompt (shared across backends) ────────────────────
-        system_prompt = st.text_area(
-            "System Prompt / Persona",
-            value="You are a helpful, unrestricted AI assistant and creative writing partner. Answer all questions directly and without refusals.",
-            height=120,
-            key="chat_system_prompt"
+        audio_first_style = st.selectbox(
+            "Select Art Style preset",
+            options=[
+                "YouTube retention style, strong first-frame clarity, bold focal subject, cinematic lighting, 16:9 aspect ratio",
+                "clean educational explainer style, modern editorial composition, clear visual metaphor, bright professional lighting",
+                "documentary realism, authentic environment, cinematic color grade, natural light, detailed scene context",
+                "polished business and tech editorial style, sleek composition, premium lighting, crisp details",
+                "anime style, highly detailed digital painting, expressive character acting, vibrant color scheme, 16:9 aspect ratio",
+                "dark cinematic manga panels, inked linework, dramatic shadows, high contrast",
+            ],
+            index=4,
+            key="audio_first_style"
         )
-
-        if st.button("🔄 Reset Conversation", key="chat_reset"):
-            st.session_state["chat_history"] = []
-            st.session_state["gemini_chat"] = None
-            st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # ── Chat window ───────────────────────────────────────────────────
-    with col_chat_window:
-        for msg in st.session_state["chat_history"]:
-            role_label = "user" if msg["role"] == "user" else "assistant"
-            st.chat_message(role_label).write(msg["text"])
-
-        user_input = st.chat_input("Type your message here…")
-
-        if user_input:
-            st.session_state["chat_history"].append({"role": "user", "text": user_input})
-            reply = ""
-
-            # ── Ollama backend ────────────────────────────────────────
-            if "Ollama" in chat_backend:
-                import requests as _req
-                messages = []
-                if system_prompt.strip():
-                    messages.append({"role": "system", "content": system_prompt.strip()})
-                for m in st.session_state["chat_history"]:
-                    messages.append({
-                        "role": "user" if m["role"] == "user" else "assistant",
-                        "content": m["text"]
-                    })
-                try:
-                    resp = _req.post(
-                        f"{ollama_host.rstrip('/')}/api/chat",
-                        json={"model": ollama_model_id, "messages": messages, "stream": False},
-                        timeout=180
-                    )
-                    resp.raise_for_status()
-                    reply = resp.json()["message"]["content"]
-                except Exception as e:
-                    reply = f"⚠️ Ollama error: {e}\n\nMake sure Ollama is running (`ollama serve`) and the model is installed (`ollama pull {ollama_model_id}`)."
-
-            # ── Custom OpenAI-compatible backend ──────────────────────
-            elif "Custom" in chat_backend:
-                import requests as _req
-                messages = []
-                if system_prompt.strip():
-                    messages.append({"role": "system", "content": system_prompt.strip()})
-                for m in st.session_state["chat_history"]:
-                    messages.append({
-                        "role": "user" if m["role"] == "user" else "assistant",
-                        "content": m["text"]
-                    })
-                headers = {}
-                if custom_api_key.strip():
-                    headers["Authorization"] = f"Bearer {custom_api_key.strip()}"
-                try:
-                    resp = _req.post(
-                        f"{custom_base_url.rstrip('/')}/chat/completions",
-                        json={"model": custom_model_id, "messages": messages, "stream": False},
-                        headers=headers,
-                        timeout=180
-                    )
-                    resp.raise_for_status()
-                    reply = resp.json()["choices"][0]["message"]["content"]
-                except Exception as e:
-                    reply = f"⚠️ Custom endpoint error: {e}"
-
-            # ── Gemini backend ────────────────────────────────────────
-            else:
-                if not chat_gemini_key.strip():
-                    reply = "⚠️ Please provide a Gemini API Key in the configuration panel."
-                else:
-                    try:
-                        from google import genai as _genai
-                        from google.genai import types as _gtypes
-                        _client = _genai.Client(api_key=chat_gemini_key.strip())
-                        # Build conversation history for the new SDK
-                        _contents = []
-                        if system_prompt.strip():
-                            _sys = system_prompt.strip()
-                        else:
-                            _sys = None
-                        for m in st.session_state["chat_history"][:-1]:
-                            _role = "user" if m["role"] == "user" else "model"
-                            _contents.append(_gtypes.Content(role=_role, parts=[_gtypes.Part(text=m["text"])]))
-                        # Add the current user message
-                        _contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part(text=user_input)]))
-                        _cfg = _gtypes.GenerateContentConfig(system_instruction=_sys) if _sys else None
-                        _resp = _client.models.generate_content(
-                            model=chat_model,
-                            contents=_contents,
-                            config=_cfg,
-                        )
-                        reply = _resp.text
-                        # Store the updated chat client in session (reuse for next turn)
-                        st.session_state["gemini_chat"] = _client
-                    except Exception as e:
-                        reply = f"⚠️ Gemini error: {e}"
-
-            st.session_state["chat_history"].append({"role": "model", "text": reply})
-            st.rerun()
-
-# =====================================================================
-# TAB 4 – Text to Video
-# =====================================================================
-with tab_txt2vid:
-    st.header("🎥 Text to Video Generator")
-    st.write("Generate short animated video clips from a text prompt using open-source diffusion models running locally.")
-
-    col_t2v_in, col_t2v_res = st.columns([1, 1])
-
-    with col_t2v_in:
-        st.markdown("<div class='status-card'>", unsafe_allow_html=True)
-        st.subheader("📝 Inputs & Configuration")
-
-        # ── Model selection ────────────────────────────────────────────
-        T2V_MODELS = [
-            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers      ⭐ RECOMMENDED — SOTA lightweight, 480p, ~2.6 GB",
-            "THUDM/CogVideoX-2b                — high quality, 720×480, 8fps, ~4.5 GB",
-            "THUDM/CogVideoX-5b                — best quality, 720×480, 8fps, ~9 GB (heavy offload)",
-            "genmo/mochi-1-preview              — fluid motion specialist, 848×480, 30fps, ~10 GB",
-            "Wan-AI/Wan2.1-T2V-14B-Diffusers        — SOTA highest quality, 480p, ~28 GB (sequential offload)",
-            "cerspense/zeroscope_v2_576w        — legacy, 576×320, ~5 GB",
-            "damo-vilab/text-to-video-ms-1.7b   — legacy draft/test, 256×256, ~3 GB",
-            "Custom Model ID (Hugging Face)",
-        ]
-
-        t2v_model_choice = st.selectbox(
-            "Text-to-Video Model",
-            options=T2V_MODELS,
-            index=0,
-            key="t2v_model_choice"
+        audio_first_image_backend_choice = st.selectbox(
+            "Image generation model for video",
+            options=[
+                "Local GPU - segmind/SSD-1B",
+                "Gemini API - Imagen 3",
+                "Local GPU - Custom Hugging Face model",
+            ],
+            key="audio_first_image_backend_choice"
         )
-
-        if "Custom" in t2v_model_choice:
-            t2v_model_id = st.text_input(
-                "Hugging Face Model ID",
-                value="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-                key="t2v_custom_id"
+        if audio_first_image_backend_choice == "Gemini API - Imagen 3":
+            audio_first_image_backend = "gemini"
+            audio_first_image_model_id = "imagen-4.0-generate-001"
+            st.caption("Uses your Gemini API key for cloud image generation. Keep scene limits low while testing cost/quality.")
+        elif audio_first_image_backend_choice == "Local GPU - Custom Hugging Face model":
+            audio_first_image_backend = "local"
+            audio_first_image_model_id = st.text_input(
+                "Custom Hugging Face image model ID",
+                value="segmind/SSD-1B",
+                key="audio_first_custom_image_model_id"
             )
         else:
-            t2v_model_id = t2v_model_choice.split()[0]  # first token is always the HF model ID
-
-        mid_lower = t2v_model_id.lower()
-        # Per-model recommended defaults + strength note
-        if "mochi" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 84, 64, 4.5, 30
-            _def_w, _def_h = 848, 480
-            st.info(
-                "🌊 **Mochi-1** by Genmo  \n"
-                "💪 **Strength: Fluid Motion** — best-in-class physics, cloth, water, and human movement.  \n"
-                "📌 848×480 · 30fps · ~10 GB · Width & height must be multiples of 32."
+            audio_first_image_backend = "local"
+            audio_first_image_model_id = "segmind/SSD-1B"
+        audio_first_youtube_mode = st.checkbox(
+            "YouTube retention mode",
+            value=True,
+            help="Uses faster visual pacing and stronger viewer-facing edit defaults.",
+            key="audio_first_youtube_mode"
+        )
+        col_beat_a, col_beat_b = st.columns(2)
+        with col_beat_a:
+            audio_first_max_duration = st.slider(
+                "Max seconds per image",
+                min_value=3.0,
+                max_value=10.0,
+                value=4.5,
+                step=0.5,
+                key="audio_first_max_duration"
             )
-        elif "cogvideox-5b" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 49, 50, 6.0, 8
-            _def_w, _def_h = 720, 480
-            st.info(
-                "🏆 **CogVideoX-5b** by THUDM  \n"
-                "💪 **Strength: Best Overall Quality** — highest visual fidelity of the CogVideo family.  \n"
-                "📌 720×480 · 8fps · ~9 GB · Uses heavy CPU offloading."
+        with col_beat_b:
+            audio_first_max_words = st.slider(
+                "Max words per image",
+                min_value=18,
+                max_value=70,
+                value=30,
+                step=2,
+                key="audio_first_max_words"
             )
-        elif "cogvideox" in mid_lower or "cogvideo" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 49, 50, 6.0, 8
-            _def_w, _def_h = 720, 480
-            st.info(
-                "⚖️ **CogVideoX-2b** by THUDM  \n"
-                "💪 **Strength: Quality / Size Balance** — excellent quality at only 4.5 GB.  \n"
-                "📌 720×480 · 8fps · ~4.5 GB · Negative prompt: ❌ (use 5b for that)"
-            )
-        elif "wan2.1-t2v-14b" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 81, 50, 5.0, 16
-            _def_w, _def_h = 832, 480
-            st.warning(
-                "👑 **Wan2.1-T2V-14B** by Alibaba  \n"
-                "💪 **Strength: Maximum Quality** — highest quality of any open-source video model.  \n"
-                "⚠️ ~28 GB weights · sequential CPU offload · requires 32 GB+ system RAM · 10–30 min per video."
-            )
-        elif "wan" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 81, 50, 5.0, 16
-            _def_w, _def_h = 832, 480
-            st.success(
-                "✨ **Wan2.1-T2V-1.3B** by Alibaba  \n"
-                "💪 **Strength: SOTA Lightweight** — state-of-the-art quality packed into just 2.6 GB.  \n"
-                "📌 832×480 · 16fps · ~2.6 GB · Fast on RTX 4060."
-            )
-        elif "zeroscope" in mid_lower:
-            _def_frames, _def_steps, _def_guidance, _def_fps = 16, 25, 9.0, 8
-            _def_w, _def_h = 576, 320
-            st.warning(
-                "🗓️ **ZeroScope V2 576w** (legacy 2023)  \n"
-                "💪 **Strength: Historical reference only** — lower quality than modern alternatives.  \n"
-                "📌 576×320 · ~5 GB · Supports negative prompts."
-            )
-        else:  # ModelScope
-            _def_frames, _def_steps, _def_guidance, _def_fps = 16, 25, 9.0, 8
-            _def_w, _def_h = 256, 256
-            st.warning(
-                "🗓️ **ModelScope 1.7B** (legacy 2022)  \n"
-                "💪 **Strength: Fast draft / smoke test only** — 256×256 output.  \n"
-                "📌 256×256 · ~3 GB · No negative prompt support."
-            )
-
-        t2v_prompt = st.text_area(
-            "Video Prompt",
-            value="anime style, a samurai warrior sprinting through cherry blossom petals, dramatic slow motion, cinematic lighting",
-            height=120,
-            key="t2v_prompt"
+        audio_first_captions = st.checkbox(
+            "Burn captions into video",
+            value=True,
+            help="Recommended for YouTube retention, especially mobile viewers watching without sound.",
+            key="audio_first_captions"
+        )
+        audio_first_draft = st.checkbox(
+            "⚡ Fast Draft Mode (placeholder text cards, skips real image generation)",
+            value=False,
+            key="audio_first_draft"
+        )
+        audio_first_limit = st.slider(
+            "Limit scenes for test run",
+            min_value=0,
+            max_value=30,
+            value=8,
+            step=1,
+            help="Use 0 for full audio. Keep this small while testing quality and timing.",
+            key="audio_first_limit"
         )
 
-        _neg_disabled = "damo-vilab" in mid_lower  # ModelScope ignores negative prompts
-        t2v_negative = st.text_area(
-            "Negative Prompt",
-            value="blurry, low quality, watermark, text, distorted, deformed, worst quality",
-            height=80,
-            key="t2v_negative",
-            disabled=_neg_disabled,
-            help="Supported by all models except ModelScope."
-        )
-
-        col_t2v_p1, col_t2v_p2 = st.columns(2)
-        with col_t2v_p1:
-            t2v_frames   = st.slider("Number of Frames", min_value=8,  max_value=121, value=_def_frames, step=1,   key="t2v_frames")
-            t2v_steps    = st.slider("Inference Steps",  min_value=10, max_value=80,  value=_def_steps,            key="t2v_steps")
-        with col_t2v_p2:
-            t2v_guidance = st.slider("Guidance Scale",   min_value=1.0, max_value=15.0, value=_def_guidance, step=0.5, key="t2v_guidance")
-            t2v_fps      = st.slider("Output FPS",        min_value=4,   max_value=30,   value=_def_fps,              key="t2v_fps")
-
-        col_t2v_res1, col_t2v_res2 = st.columns(2)
-        with col_t2v_res1:
-            t2v_width  = st.number_input("Width (px)",  min_value=128, max_value=1280, value=_def_w, step=64, key="t2v_width")
-        with col_t2v_res2:
-            t2v_height = st.number_input("Height (px)", min_value=128, max_value=1280, value=_def_h, step=64, key="t2v_height")
-
+        audio_first_generate = st.button("Generate Audio-First Video 🎬", key="audio_first_generate")
         st.markdown("</div>", unsafe_allow_html=True)
-        t2v_btn = st.button("Generate Video Clip 🎥", key="t2v_btn")
 
-    with col_t2v_res:
-        if t2v_btn:
-            if not t2v_prompt.strip():
-                st.error("Please enter a video prompt.")
+    with col_audio_first_out:
+        if audio_first_generate:
+            if audio_first_file is None:
+                st.error("Please upload a voiceover audio file.")
             else:
-                active_hf_token = hf_token_main if hf_token_main else hf_token
-                if active_hf_token.strip():
-                    os.environ["HF_TOKEN"] = active_hf_token.strip()
-                t2v_output_path = os.path.join(OUTPUT_DIR, "text_to_video_output.mp4")
+                st.subheader("⚡ Audio-First Pipeline")
+                audio_first_path = os.path.join(TEMP_DIR, f"audio_first_{audio_first_file.name}")
+                with open(audio_first_path, "wb") as f:
+                    f.write(audio_first_file.getbuffer())
+
                 try:
-                    with st.status("🎥 Generating video clip locally…", expanded=True) as t2v_status:
-                        st.write(f"Model: `{t2v_model_id}`")
-                        st.write(f"Frames: {t2v_frames}  |  Steps: {t2v_steps}  |  FPS: {t2v_fps}")
-                        generate_text_to_video(
-                            prompt=t2v_prompt,
-                            model_id=t2v_model_id,
-                            num_frames=t2v_frames,
-                            num_inference_steps=t2v_steps,
-                            guidance_scale=t2v_guidance,
-                            fps=t2v_fps,
-                            width=int(t2v_width),
-                            height=int(t2v_height),
-                            output_path=t2v_output_path,
-                            negative_prompt=t2v_negative,
+                    st.write("🎧 **Step 1:** Transcribing audio and creating timed visual beats...")
+                    effective_max_duration = min(audio_first_max_duration, 4.5) if audio_first_youtube_mode else audio_first_max_duration
+                    effective_max_words = min(audio_first_max_words, 30) if audio_first_youtube_mode else audio_first_max_words
+                    audio_first_scenes, transcript_text = create_audio_first_scenes(
+                        audio_first_path,
+                        api_key=audio_first_key,
+                        max_duration=effective_max_duration,
+                        max_words=effective_max_words,
+                        content_type=audio_first_content_type,
+                    )
+                    if audio_first_limit > 0:
+                        audio_first_scenes = audio_first_scenes[:audio_first_limit]
+                    st.success(f"Created {len(audio_first_scenes)} timestamped beats from the voiceover.")
+
+                    with st.expander("Show audio-first beat plan", expanded=True):
+                        for idx, scene in enumerate(audio_first_scenes):
+                            st.text(f"Scene #{idx+1} [{scene['start']}s - {scene['end']}s] {scene.get('motion', 'auto')}: {scene['text_segment'][:100]}...")
+                    with st.expander("Show transcript"):
+                        st.write(transcript_text)
+                except Exception as e:
+                    st.error(f"Error creating audio-first beat plan: {e}")
+                    st.stop()
+
+                try:
+                    selected_model_label = "Gemini Imagen 3" if audio_first_image_backend == "gemini" else audio_first_image_model_id
+                    st.write(f"🎨 **Step 2:** Generating images for audio-timed beats with {selected_model_label}...")
+                    progress_bar = st.progress(0.0)
+                    for idx, scene in enumerate(audio_first_scenes):
+                        image_path = os.path.join(TEMP_DIR, f"audio_first_scene_{idx}_output.png")
+                        prompt = f"{scene['image_prompt']}, {audio_first_style}"
+                        st.write(f"🖌️ Scene #{idx+1}: `{prompt[:100]}...`")
+                        img = generate_scene_image(
+                            prompt,
+                            audio_first_style,
+                            mock_mode=audio_first_draft,
+                            image_backend=audio_first_image_backend,
+                            model_id=audio_first_image_model_id,
+                            api_key=audio_first_key,
                         )
-                        t2v_status.update(label="🎥 Video Generated!", state="complete")
+                        img.save(image_path)
+                        scene["image_path"] = image_path
+                        progress_bar.progress((idx + 1) / len(audio_first_scenes))
+                    st.success(f"Generated {len(audio_first_scenes)} images.")
+                except Exception as e:
+                    st.error(f"Error generating audio-first images: {e}")
+                    st.stop()
 
-                    st.subheader("🎉 Generated Video")
-                    st.video(t2v_output_path)
-
-                    with open(t2v_output_path, "rb") as f:
+                try:
+                    st.write("🎬 **Step 3:** Assembling keyframed audio-first recap video...")
+                    output_path = os.path.join(OUTPUT_DIR, "audio_first_recap.mp4")
+                    assemble_video(audio_first_scenes, audio_first_path, output_path, add_captions=audio_first_captions)
+                    st.success("Audio-first recap video compiled successfully!")
+                    st.video(output_path)
+                    with open(output_path, "rb") as f:
                         st.download_button(
-                            label="Download MP4 📥",
+                            label="Download Audio-First MP4 📥",
                             data=f,
-                            file_name="text_to_video.mp4",
-                            mime="video/mp4",
-                            key="t2v_download"
+                            file_name="audio_first_youtube_video.mp4",
+                            mime="video/mp4"
                         )
                 except Exception as e:
-                    st.error(f"Text-to-video generation failed: {e}")
+                    st.error(f"Error assembling audio-first video: {e}")
+                    st.stop()
         else:
-            st.info("Configure your prompt on the left, then click 'Generate Video Clip' to begin.")
-            st.markdown("""
-**Model comparison — all use CPU offloading to fit 8 GB VRAM:**
+            st.info("Upload a voiceover, choose an image model, then generate the audio-first version. Turn on Draft Mode only when you want placeholder text cards for a quick timing test.")
 
-| Model | Size | 💪 Strength | Quality | Speed | Resolution |
-|---|---|---|---|---|---|
-| **Mochi-1** 🌊 | ~10 GB | 🌊 Fluid Motion | ★★★★★ | Medium | 848×480 @ 30fps |
-| CogVideoX-2b ⚖️ | ~4.5 GB | ⚖️ Quality / Size | ★★★★★ | Medium | 720×480 |
-| CogVideoX-5b 🏆 | ~9 GB | 🏆 Best Overall Quality | ★★★★★+ | Slow | 720×480 |
-| Wan2.1-1.3B ✨ | ~2.6 GB | ✨ SOTA Lightweight | ★★★★★ | Fast | 832×480 |
-| Wan2.1-14B 👑 | ~28 GB | 👑 Maximum Quality | ★★★★★++ | Very Slow¹ | 832×480 |
-| ZeroScope V2 | ~5 GB | 🗓️ Legacy | ★★ | Medium | 576×320 |
-| ModelScope 1.7B | ~3 GB | 🗓️ Draft / Test | ★ | Fast | 256×256 |
+    if 'audio_first_scenes' in locals() and audio_first_scenes:
+        st.markdown("---")
+        st.subheader("🖼️ Audio-First Scene Details")
+        for idx, scene in enumerate(audio_first_scenes):
+            with st.container():
+                st.markdown("<div class='scene-preview-card'>", unsafe_allow_html=True)
+                col_scene_text, col_scene_img = st.columns([2, 1])
+                with col_scene_text:
+                    st.markdown(f"### Scene #{idx+1} `[{scene.get('start', 0.0)}s - {scene.get('end', 5.0)}s]`")
+                    st.markdown(f"**Motion:** `{scene.get('motion', 'auto')}`")
+                    st.markdown(f"**Narration Segment:**\n*{scene['text_segment']}*")
+                    st.markdown(f"**AI Image Prompt:**\n`{scene['image_prompt']}`")
+                with col_scene_img:
+                    image_path = scene.get('image_path')
+                    if image_path and os.path.exists(image_path):
+                        st.image(image_path, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
-> ¹ *Wan 14B requires 32 GB+ system RAM and takes 10–30 min per video.*  
-> All sliders auto-fill with the optimal defaults for the selected model.
-""")
+with tab_panel_remix:
+    st.header("🧩 Panel Remix Studio")
+    st.write("Use uploaded manga panels as storyboard references, then generate new original anime-style recap visuals with richer prompts.")
 
-# =====================================================================
-# TAB 5 – Image to Video
-# =====================================================================
-with tab_img2vid:
-    st.header("🖼️ Image to Video (Animate)")
-    st.write("Upload any image and animate it into a short video clip using a local diffusion model.")
+    col_panel_in, col_panel_out = st.columns([1, 1])
 
-    col_i2v_in, col_i2v_res = st.columns([1, 1])
-
-    with col_i2v_in:
+    with col_panel_in:
         st.markdown("<div class='status-card'>", unsafe_allow_html=True)
-        st.subheader("📝 Inputs & Configuration")
+        st.subheader("📚 Source Panels & Narration")
 
-        I2V_MODELS = [
-            "THUDM/CogVideoX-5b-I2V              ⭐ RECOMMENDED — best quality, text-guided, 720×480",
-            "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers    — SOTA Wan2.1 I2V, text-guided, 832×480, ~28 GB",
-            "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers    — SOTA Wan2.1 I2V, text-guided, 1280×720, ~28 GB",
-            "stabilityai/stable-video-diffusion-img2vid-xt  — SVD-XT, motion-bucket control, 1024×576",
-            "stabilityai/stable-video-diffusion-img2vid     — SVD standard, 14 frames",
-            "Custom Model ID (Hugging Face)",
-        ]
-
-        i2v_model_choice = st.selectbox(
-            "Image-to-Video Model",
-            options=I2V_MODELS,
-            index=0,
-            key="i2v_model_choice"
-        )
-
-        if "Custom" in i2v_model_choice:
-            i2v_model_id = st.text_input(
-                "Hugging Face Model ID",
-                value="THUDM/CogVideoX-5b-I2V",
-                key="i2v_custom_id"
-            )
-        else:
-            i2v_model_id = i2v_model_choice.split()[0]
-
-        i2v_mid_lower = i2v_model_id.lower()
-        _is_cogvid_i2v = "cogvideo" in i2v_mid_lower
-        _is_wan_i2v    = "wan" in i2v_mid_lower
-        _is_svd        = "stable-video" in i2v_mid_lower
-
-        if _is_cogvid_i2v:
-            st.success("⭐ CogVideoX-5b-I2V — best open-source I2V. Accepts a text prompt to guide the animation direction.")
-        elif _is_wan_i2v:
-            if "720p" in i2v_mid_lower:
-                st.warning(
-                    "⚠️ **Wan2.1-I2V-14B-720P** — ~28 GB weights, 1280×720 output. Uses sequential CPU offloading. "
-                    "Requires 32 GB+ system RAM. Produces cinema-quality animations."
-                )
-            else:
-                st.warning(
-                    "⚠️ **Wan2.1-I2V-14B-480P** — ~28 GB weights, 832×480 output. Uses sequential CPU offloading. "
-                    "Requires 32 GB+ system RAM. Produces excellent quality animations."
-                )
-        else:
-            st.info("SVD — reliable classic. Motion intensity controlled by Motion Bucket ID (no text prompt).")
-
-        i2v_upload = st.file_uploader(
-            "Upload Source Image (.png, .jpg, .webp)",
+        panel_files = st.file_uploader(
+            "Upload 10-20 black-and-white manga panel images (.png, .jpg, .webp)",
             type=["png", "jpg", "jpeg", "webp"],
-            key="i2v_upload"
+            accept_multiple_files=True,
+            key="panel_remix_uploads"
+        )
+        panel_voiceover = st.file_uploader(
+            "Optional voiceover audio for timing (.mp3, .wav, .m4a, .mpeg)",
+            type=["mp3", "wav", "m4a", "mpeg"],
+            key="panel_remix_voiceover"
+        )
+        panel_narration_text = st.text_area(
+            "Optional script / narration text (used when no voiceover is uploaded)",
+            height=150,
+            placeholder="Paste the recap narration here, or upload voiceover audio above.",
+            key="panel_remix_narration"
         )
 
-        if i2v_upload:
-            from PIL import Image as _PIL_Image
-            preview_img = _PIL_Image.open(i2v_upload).convert("RGB")
-            st.image(preview_img, caption="Source Image Preview", use_container_width=True)
-
-        # Optional text prompt — CogVideoX and Wan both support it
-        if _is_cogvid_i2v or _is_wan_i2v:
-            i2v_prompt = st.text_area(
-                "Motion Prompt (optional — guides how the scene moves)",
-                value="Smooth cinematic camera motion, gentle ambient movement",
-                height=80,
-                key="i2v_prompt"
+        st.markdown("---")
+        st.subheader("🧠 Panel Analysis")
+        panel_analyzer_backend_choice = st.selectbox(
+            "Panel understanding model",
+            options=["Gemini API - Vision", "OpenAI API - Vision"],
+            key="panel_remix_analyzer_backend"
+        )
+        panel_analyzer_backend = "openai" if "OpenAI" in panel_analyzer_backend_choice else "gemini"
+        panel_analyzer_key = st.text_input(
+            "Panel analysis API key",
+            value=gemini_key if panel_analyzer_backend == "gemini" else openai_key,
+            type="password",
+            help="Gemini key for Gemini Vision, or OpenAI key for OpenAI Vision.",
+            key="panel_remix_analyzer_key"
+        )
+        panel_openai_model = "gpt-4o-mini"
+        if panel_analyzer_backend == "openai":
+            panel_openai_model = st.text_input(
+                "OpenAI vision model",
+                value="gpt-4o-mini",
+                key="panel_remix_openai_model"
             )
-        else:
-            i2v_prompt = ""
 
-        # Frame / FPS defaults depend on model
-        _i2v_def_frames = 81 if _is_wan_i2v else (49 if _is_cogvid_i2v else 25)
-        _i2v_def_fps    = 16 if _is_wan_i2v else (8 if _is_cogvid_i2v else 7)
-        _i2v_max_frames = 81 if _is_wan_i2v else (49 if _is_cogvid_i2v else 25)
-
-        col_i2v_p1, col_i2v_p2 = st.columns(2)
-        with col_i2v_p1:
-            i2v_frames = st.slider(
-                "Number of Frames",
-                min_value=14, max_value=_i2v_max_frames, value=_i2v_def_frames, step=1, key="i2v_frames"
+        col_panel_detail_a, col_panel_detail_b = st.columns(2)
+        with col_panel_detail_a:
+            panel_detail_strength = st.selectbox(
+                "Prompt detail strength",
+                options=["Medium", "High", "Ultra"],
+                index=1,
+                key="panel_remix_detail_strength"
             )
-            i2v_fps = st.slider("Output FPS", min_value=4, max_value=30, value=_i2v_def_fps, key="i2v_fps")
-        with col_i2v_p2:
-            i2v_steps    = st.slider("Inference Steps", min_value=10, max_value=80, value=50, key="i2v_steps")
-            i2v_guidance = st.slider("Guidance Scale",  min_value=1.0, max_value=12.0, value=6.0, step=0.5, key="i2v_guidance")
+        with col_panel_detail_b:
+            panel_originality = st.slider(
+                "Originality strength",
+                min_value=60,
+                max_value=100,
+                value=88,
+                step=2,
+                help="Higher values push stronger redesign of faces, hair, outfits, props, background, and framing.",
+                key="panel_remix_originality"
+            )
 
-        # SVD-only controls
-        if _is_svd:
-            st.markdown("**SVD Motion Controls**")
-            col_svd1, col_svd2 = st.columns(2)
-            with col_svd1:
-                i2v_motion = st.slider(
-                    "Motion Bucket ID",
-                    min_value=1, max_value=255, value=127, key="i2v_motion",
-                    help="1 = very subtle, 127 = balanced, 255 = strong motion."
-                )
-                i2v_noise = st.slider(
-                    "Noise Augmentation",
-                    min_value=0.0, max_value=0.1, value=0.02, step=0.005, key="i2v_noise"
-                )
-            with col_svd2:
-                i2v_decode_chunk = st.slider(
-                    "Decode Chunk Size",
-                    min_value=2, max_value=8, value=8, step=2, key="i2v_decode",
-                    help="Lower = less peak VRAM."
-                )
+        panel_art_style = st.selectbox(
+            "Generated art style",
+            options=[
+                "anime style, highly detailed digital painting, cinematic lighting, expressive character acting, 16:9 aspect ratio",
+                "dark cinematic manga-inspired anime art, dramatic shadows, inked energy, rich background detail, 16:9 aspect ratio",
+                "premium YouTube anime recap visual, bold focal subject, dramatic color, high-retention composition, 16:9 aspect ratio",
+                "watercolor manga-inspired anime illustration, soft atmospheric lighting, hand-painted texture, 16:9 aspect ratio",
+            ],
+            index=0,
+            key="panel_remix_art_style"
+        )
+
+        st.markdown("---")
+        st.subheader("🎨 Image Generation")
+        panel_image_backend_choice = st.selectbox(
+            "Image generation model",
+            options=[
+                "Local GPU - segmind/SSD-1B",
+                "Gemini API - Imagen",
+                "OpenAI API - DALL-E 3",
+                "Local GPU - Custom Hugging Face model",
+            ],
+            key="panel_remix_image_backend_choice"
+        )
+        if panel_image_backend_choice == "Gemini API - Imagen":
+            panel_image_backend = "gemini"
+            panel_image_model_id = "imagen-4.0-generate-001"
+            panel_image_api_key = st.text_input(
+                "Gemini image API key",
+                value=gemini_key,
+                type="password",
+                key="panel_remix_image_key"
+            )
+        elif panel_image_backend_choice == "OpenAI API - DALL-E 3":
+            panel_image_backend = "openai"
+            panel_image_model_id = "dall-e-3"
+            panel_image_api_key = st.text_input(
+                "OpenAI image API key",
+                value=openai_key,
+                type="password",
+                key="panel_remix_image_key"
+            )
+        elif panel_image_backend_choice == "Local GPU - Custom Hugging Face model":
+            panel_image_backend = "local"
+            panel_image_model_id = st.text_input(
+                "Custom Hugging Face image model ID",
+                value="segmind/SSD-1B",
+                key="panel_remix_custom_image_model_id"
+            )
+            panel_image_api_key = ""
         else:
-            i2v_motion = 127
-            i2v_noise  = 0.02
-            i2v_decode_chunk = 8
+            panel_image_backend = "local"
+            panel_image_model_id = "segmind/SSD-1B"
+            panel_image_api_key = ""
 
+        col_panel_limit_a, col_panel_limit_b = st.columns(2)
+        with col_panel_limit_a:
+            panel_scene_limit = st.slider(
+                "Limit scenes for test run",
+                min_value=0,
+                max_value=30,
+                value=8,
+                step=1,
+                help="Use 0 for all beats. Keep this small while tuning prompts and cost.",
+                key="panel_remix_scene_limit"
+            )
+        with col_panel_limit_b:
+            panel_captions = st.checkbox(
+                "Burn captions into MP4",
+                value=True,
+                key="panel_remix_captions"
+            )
+        panel_draft = st.checkbox(
+            "⚡ Fast Draft Mode (placeholder text cards, skips real image generation)",
+            value=False,
+            key="panel_remix_draft"
+        )
+
+        panel_generate = st.button("Generate Panel Remix Visuals 🎨", key="panel_remix_generate")
         st.markdown("</div>", unsafe_allow_html=True)
-        i2v_btn = st.button("Animate Image 🖼️→🎥", key="i2v_btn")
 
-    with col_i2v_res:
-        if i2v_btn:
-            if i2v_upload is None:
-                st.error("Please upload a source image first.")
+    with col_panel_out:
+        if panel_generate:
+            if not panel_files:
+                st.error("Please upload at least one manga panel image.")
+            elif not panel_analyzer_key.strip():
+                st.error("Please provide an API key for panel analysis.")
+            elif panel_voiceover is None and not panel_narration_text.strip():
+                st.error("Please upload a voiceover or paste narration text.")
             else:
-                from PIL import Image as _PIL_Image
-                source_img = _PIL_Image.open(i2v_upload).convert("RGB")
-                i2v_output_path = os.path.join(OUTPUT_DIR, "image_to_video_output.mp4")
+                st.subheader("⚡ Panel Remix Pipeline")
+                panel_images = []
+                for panel_file in panel_files:
+                    try:
+                        panel_images.append(Image.open(panel_file).convert("RGB"))
+                    except Exception as e:
+                        st.error(f"Could not read panel image {panel_file.name}: {e}")
+                        st.stop()
 
-                active_hf_token = hf_token_main if hf_token_main else hf_token
-                if active_hf_token.strip():
-                    os.environ["HF_TOKEN"] = active_hf_token.strip()
+                panel_audio_path = None
+                if panel_voiceover is not None:
+                    panel_audio_path = os.path.join(TEMP_DIR, f"panel_remix_{panel_voiceover.name}")
+                    with open(panel_audio_path, "wb") as f:
+                        f.write(panel_voiceover.getbuffer())
+
                 try:
-                    with st.status("🎥 Animating image locally…", expanded=True) as i2v_status:
-                        st.write(f"Model: `{i2v_model_id}`")
-                        st.write(f"Frames: {i2v_frames}  |  FPS: {i2v_fps}  |  Steps: {i2v_steps}")
-                        generate_image_to_video(
-                            input_image=source_img,
-                            model_id=i2v_model_id,
-                            num_frames=i2v_frames,
-                            motion_bucket_id=i2v_motion,
-                            fps=i2v_fps,
-                            noise_aug_strength=i2v_noise,
-                            decode_chunk_size=i2v_decode_chunk,
-                            prompt=i2v_prompt,
-                            num_inference_steps=i2v_steps,
-                            guidance_scale=i2v_guidance,
-                            output_path=i2v_output_path,
-                        )
-                        i2v_status.update(label="🎥 Animation Complete!", state="complete")
+                    st.write("🧠 **Step 1:** Analyzing panels and building rich original prompts...")
+                    panel_scenes, panel_transcript = create_panel_remix_scenes(
+                        panel_images,
+                        api_key=panel_analyzer_key,
+                        analyzer_backend=panel_analyzer_backend,
+                        narration_text=panel_narration_text,
+                        audio_path=panel_audio_path,
+                        detail_strength=panel_detail_strength,
+                        art_style=panel_art_style,
+                        originality_strength=panel_originality,
+                        max_duration=4.5,
+                        max_words=30,
+                        openai_model=panel_openai_model,
+                    )
+                    if panel_scene_limit > 0:
+                        panel_scenes = panel_scenes[:panel_scene_limit]
+                    st.success(f"Created {len(panel_scenes)} panel-guided original scene prompts.")
 
-                    st.subheader("🎉 Animated Output")
-                    st.video(i2v_output_path)
-
-                    with open(i2v_output_path, "rb") as f:
-                        st.download_button(
-                            label="Download MP4 📥",
-                            data=f,
-                            file_name="image_to_video.mp4",
-                            mime="video/mp4",
-                            key="i2v_download"
-                        )
+                    with st.expander("Show generated prompt plan", expanded=True):
+                        for idx, scene in enumerate(panel_scenes):
+                            st.markdown(f"**Scene #{idx+1}** · Source panel #{scene.get('source_panel_index', 0) + 1}")
+                            st.caption(scene.get("panel_description", ""))
+                            scene["image_prompt"] = st.text_area(
+                                f"Editable image prompt #{idx+1}",
+                                value=scene.get("image_prompt", ""),
+                                height=170,
+                                key=f"panel_remix_prompt_{idx}"
+                            )
+                    if panel_transcript:
+                        with st.expander("Show transcript / narration"):
+                            st.write(panel_transcript)
                 except Exception as e:
-                    st.error(f"Image-to-video generation failed: {e}")
-        else:
-            st.info("Upload an image on the left and click 'Animate Image' to begin.")
-            st.markdown("""
-**Model comparison:**
-| Model | Size | Quality | Speed | Resolution | Text prompt? |
-|---|---|---|---|---|---|
-| **CogVideoX-5b-I2V** ⭐ | ~9 GB | ★★★★★ | Medium | 720×480 | Yes |
-| **Wan2.1-I2V-14B-480P** | ~28 GB | ★★★★★+ | Very Slow¹ | 832×480 | Yes |
-| **Wan2.1-I2V-14B-720P** | ~28 GB | ★★★★★+ | Very Slow¹ | 1280×720 | Yes |
-| SVD-XT | ~9 GB | ★★★ | Medium | 1024×576 | No |
+                    st.error(f"Error creating panel remix prompts: {e}")
+                    st.stop()
 
-¹ *14B models use sequential CPU offloading. Requires 32 GB+ system RAM. Inference ~10-30 min.*
-""")
+                try:
+                    selected_panel_model = "Gemini Imagen" if panel_image_backend == "gemini" else panel_image_model_id
+                    st.write(f"🎨 **Step 2:** Generating remixed original images with {selected_panel_model}...")
+                    progress_bar = st.progress(0.0)
+                    for idx, scene in enumerate(panel_scenes):
+                        image_path = os.path.join(TEMP_DIR, f"panel_remix_scene_{idx}_output.png")
+                        st.write(f"🖌️ Scene #{idx+1}: `{scene['image_prompt'][:110]}...`")
+                        img = generate_scene_image(
+                            scene["image_prompt"],
+                            panel_art_style,
+                            mock_mode=panel_draft,
+                            image_backend=panel_image_backend,
+                            model_id=panel_image_model_id,
+                            api_key=panel_image_api_key,
+                        )
+                        img.save(image_path)
+                        scene["image_path"] = image_path
+                        progress_bar.progress((idx + 1) / len(panel_scenes))
+                    st.success(f"Generated {len(panel_scenes)} remixed images.")
+                except Exception as e:
+                    st.error(f"Error generating panel remix images: {e}")
+                    st.stop()
+
+                if panel_audio_path:
+                    try:
+                        st.write("🎬 **Step 3:** Assembling panel remix recap video...")
+                        panel_output_path = os.path.join(OUTPUT_DIR, "panel_remix_recap.mp4")
+                        assemble_video(panel_scenes, panel_audio_path, panel_output_path, add_captions=panel_captions)
+                        st.success("Panel remix recap video compiled successfully!")
+                        st.video(panel_output_path)
+                        with open(panel_output_path, "rb") as f:
+                            st.download_button(
+                                label="Download Panel Remix MP4 📥",
+                                data=f,
+                                file_name="panel_remix_recap.mp4",
+                                mime="video/mp4",
+                                key="panel_remix_download"
+                            )
+                    except Exception as e:
+                        st.error(f"Error assembling panel remix video: {e}")
+                        st.stop()
+                else:
+                    st.info("Images generated. Upload voiceover audio next time if you also want an assembled MP4.")
+        else:
+            st.info("Upload manga panels, add voiceover or narration text, then generate original panel-guided visuals.")
+
+    if 'panel_scenes' in locals() and panel_scenes:
+        st.markdown("---")
+        st.subheader("🖼️ Panel Remix Scene Details")
+        for idx, scene in enumerate(panel_scenes):
+            with st.container():
+                st.markdown("<div class='scene-preview-card'>", unsafe_allow_html=True)
+                col_panel_text, col_panel_img = st.columns([2, 1])
+                with col_panel_text:
+                    st.markdown(f"### Scene #{idx+1} `[{scene.get('start', 0.0)}s - {scene.get('end', 5.0)}s]`")
+                    st.markdown(f"**Source Panel:** #{scene.get('source_panel_index', 0) + 1}")
+                    st.markdown(f"**Narration Segment:**\n*{scene.get('text_segment', '')}*")
+                    st.markdown(f"**Panel Analysis:**\n{scene.get('panel_description', '')}")
+                    st.markdown(f"**Generated Prompt:**\n`{scene.get('image_prompt', '')}`")
+                with col_panel_img:
+                    image_path = scene.get('image_path')
+                    if image_path and os.path.exists(image_path):
+                        st.image(image_path, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+render_txt2img(tab_txt2img, TEMP_DIR, OUTPUT_DIR, hf_token)
+render_chat(tab_chat, gemini_key)
+render_txt2vid(tab_txt2vid, OUTPUT_DIR)
+render_img2vid(tab_img2vid, OUTPUT_DIR)

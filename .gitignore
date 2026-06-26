@@ -36,3 +36,5 @@ uvicorn.pid
 # Any temporary files
 tmp/
 *.tmp
+temp/
+output/

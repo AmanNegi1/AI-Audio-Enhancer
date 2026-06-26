@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import threading
 from huggingface_hub import snapshot_download
+from tqdm.auto import tqdm
 
 # Helper to check if running inside Streamlit
 def is_in_streamlit():
@@ -11,15 +12,13 @@ def is_in_streamlit():
     except ImportError:
         return False
 
-class StreamlitHubProgress:
+class StreamlitHubProgress(tqdm):
     _lock = threading.Lock()
     _placeholders = {}
     _bars = {}
 
     def __init__(self, *args, **kwargs):
-        self.desc = kwargs.get("desc", "")
-        self.total = kwargs.get("total", None)
-        self.n = 0
+        super().__init__(*args, **kwargs)
         self.id = id(self)
         
         if is_in_streamlit():
@@ -34,7 +33,7 @@ class StreamlitHubProgress:
                 StreamlitHubProgress._bars[self.id] = self.bar
 
     def update(self, n=1):
-        self.n += n
+        super().update(n)
         if is_in_streamlit():
             with StreamlitHubProgress._lock:
                 if self.id not in StreamlitHubProgress._bars:
@@ -64,6 +63,7 @@ class StreamlitHubProgress:
                     StreamlitHubProgress._placeholders[self.id].text(text)
 
     def close(self):
+        super().close()
         if is_in_streamlit():
             with StreamlitHubProgress._lock:
                 if self.id in StreamlitHubProgress._placeholders:

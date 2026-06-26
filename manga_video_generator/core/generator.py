@@ -2,6 +2,8 @@ import torch
 from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
 import streamlit as st
 import os
+import base64
+from io import BytesIO
 
 # Helper to check if running inside Streamlit
 def is_in_streamlit():
@@ -12,7 +14,7 @@ def is_in_streamlit():
         return False
 
 @st.cache_resource
-def get_pipeline():
+def get_pipeline(model_id="segmind/SSD-1B"):
     """
     Loads and caches the Stable Diffusion XL pipeline.
     Optimizes for 8GB VRAM (RTX 4060) using float16 and attention slicing.
@@ -20,12 +22,12 @@ def get_pipeline():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     
-    msg = "⏳ Loading Stable Diffusion model (First run will download 2.5 GB of weights. Please wait, this may take a few minutes)..."
+    msg = f"⏳ Loading image model {model_id} (First run may download model weights. Please wait)..."
     
     if is_in_streamlit():
         with st.spinner(msg):
             pipeline = StableDiffusionXLPipeline.from_pretrained(
-                "segmind/SSD-1B",
+                model_id,
                 torch_dtype=dtype,
                 use_safetensors=True,
                 low_cpu_mem_usage=True
@@ -36,7 +38,7 @@ def get_pipeline():
                 pipeline.enable_attention_slicing()
     else:
         pipeline = StableDiffusionXLPipeline.from_pretrained(
-            "segmind/SSD-1B",
+            model_id,
             torch_dtype=dtype,
             use_safetensors=True,
             low_cpu_mem_usage=True
@@ -49,6 +51,14 @@ def get_pipeline():
     return pipeline
 
 from PIL import Image, ImageDraw
+
+GEMINI_IMAGE_MODELS = [
+    "imagen-4.0-generate-001",
+    "imagen-4.0-ultra-generate-001",
+    "imagen-4.0-fast-generate-001",
+    "imagen-3.0-generate-001",
+    "imagen-3.0-generate-002",
+]
 
 def generate_mock_image(prompt):
     """
@@ -84,14 +94,168 @@ def generate_mock_image(prompt):
     
     return img
 
-def generate_scene_image(prompt, style_preset="anime style, highly detailed digital painting, vibrant color scheme, 16:9 aspect ratio", mock_mode=False):
+def generate_gemini_image(prompt, style_preset, api_key, model_id="imagen-4.0-generate-001"):
     """
-    Generates a 16:9 image using the cached SDXL pipeline, or uses mock mode.
+    Generates an image using Google's Imagen API through the Gemini developer API.
+    """
+    if not api_key or not api_key.strip():
+        raise ValueError("Gemini API key is required for Gemini image generation.")
+
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise ImportError("Install google-genai to use Gemini image generation: pip install google-genai") from exc
+
+    from core.gemini_manager import run_with_rotation
+
+    full_prompt = (
+        f"Create a high quality 16:9 YouTube video scene image. {prompt}, {style_preset}. "
+        "No text, no captions, no watermark, no logos."
+    )
+    model_candidates = [model_id] + [name for name in GEMINI_IMAGE_MODELS if name != model_id]
+    
+    def _call_gemini_image(key):
+        client = genai.Client(api_key=key.strip())
+        last_err = None
+        for candidate_model_id in model_candidates:
+            try:
+                response = client.models.generate_images(
+                    model=candidate_model_id,
+                    prompt=full_prompt,
+                    config={"number_of_images": 1, "aspect_ratio": "16:9"},
+                )
+                return response
+            except Exception as error:
+                last_err = error
+        raise last_err
+
+    try:
+        response = run_with_rotation(_call_gemini_image)
+    except Exception as exc:
+        raise ValueError(
+            "Gemini Imagen generation failed. Tried all keys/models. "
+            f"Last error: {exc}"
+        )
+
+    if not getattr(response, "generated_images", None):
+        raise ValueError("Gemini image generation returned no images.")
+
+    generated_image = response.generated_images[0]
+    image_data = generated_image.image.image_bytes
+    if isinstance(image_data, str):
+        image_data = base64.b64decode(image_data)
+
+    return Image.open(BytesIO(image_data)).convert("RGB").resize((1024, 576))
+
+def generate_openai_image(prompt, style_preset, api_key, model_id="dall-e-3"):
+    """
+    Generates an image using OpenAI's DALL-E API with automatic key rotation.
+    """
+    if not api_key or not api_key.strip():
+        raise ValueError("OpenAI API key is required for DALL-E image generation.")
+
+    from core.openai_manager import run_with_openai_rotation
+    import requests
+
+    full_prompt = (
+        f"Create a high quality 16:9 YouTube video scene image. {prompt}, {style_preset}. "
+        "No text, no captions, no watermark, no logos."
+    )
+
+    def _call_openai_image(key):
+        models_to_try = [model_id] + [name for name in ["dall-e-3", "dall-e-2"] if name != model_id]
+        last_err = None
+        for model in models_to_try:
+            size = "1792x1024" if model == "dall-e-3" else "1024x1024"
+            try:
+                response = requests.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={"Authorization": f"Bearer {key.strip()}", "Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "prompt": full_prompt,
+                        "n": 1,
+                        "size": size,
+                    },
+                    timeout=45,
+                )
+                response.raise_for_status()
+                img_url = response.json()["data"][0]["url"]
+                
+                # Download image content
+                img_res = requests.get(img_url, timeout=30)
+                img_res.raise_for_status()
+                return img_res.content
+            except Exception as e:
+                err_msg = str(e).lower()
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        err_msg += " " + e.response.text.lower()
+                    except:
+                        pass
+                if "does not exist" in err_msg or "invalid_value" in err_msg or "not found" in err_msg:
+                    last_err = e
+                    continue
+                else:
+                    raise e
+        raise last_err
+
+    try:
+        image_bytes = run_with_openai_rotation(_call_openai_image, passed_key=api_key)
+    except Exception as exc:
+        raise ValueError(
+            f"OpenAI DALL-E generation failed. Tried all keys/models. Last error: {exc}"
+        )
+
+    return Image.open(BytesIO(image_bytes)).convert("RGB").resize((1024, 576))
+
+def generate_scene_image(
+    prompt,
+    style_preset="anime style, highly detailed digital painting, vibrant color scheme, 16:9 aspect ratio",
+    mock_mode=False,
+    image_backend="local",
+    model_id="segmind/SSD-1B",
+    api_key="",
+):
+    """
+    Generates a 16:9 image using local Diffusers, Gemini Imagen, OpenAI DALL-E, or mock mode.
     """
     if mock_mode:
         return generate_mock_image(prompt)
+
+    if image_backend == "openai":
+        try:
+            return generate_openai_image(prompt, style_preset, api_key, model_id=model_id)
+        except Exception as e:
+            try:
+                import streamlit as st
+                st.warning(f"⚠️ OpenAI DALL-E generation failed: {e}. Falling back to local GPU / draft card...", icon="⚠️")
+            except:
+                print(f"[WARNING] OpenAI DALL-E failed: {e}. Falling back to local GPU / draft...")
+            try:
+                # Try to fall back to the fast local GPU model (SSD-1B)
+                return generate_scene_image(prompt, style_preset, mock_mode=False, image_backend="local", model_id="segmind/SSD-1B")
+            except Exception as local_err:
+                # If local generation fails (no GPU or CUDA error), fall back to draft placeholder
+                return generate_mock_image(prompt)
+
+    if image_backend == "gemini":
+        try:
+            return generate_gemini_image(prompt, style_preset, api_key, model_id=model_id)
+        except Exception as e:
+            try:
+                import streamlit as st
+                st.warning(f"⚠️ Gemini Imagen generation failed: {e}. Falling back to local GPU / draft card...", icon="⚠️")
+            except:
+                print(f"[WARNING] Gemini Imagen failed: {e}. Falling back to local GPU / draft...")
+            try:
+                # Try to fall back to the fast local GPU model (SSD-1B)
+                return generate_scene_image(prompt, style_preset, mock_mode=False, image_backend="local", model_id="segmind/SSD-1B")
+            except Exception as local_err:
+                # If local generation fails (no GPU or CUDA error), fall back to draft placeholder
+                return generate_mock_image(prompt)
         
-    pipe = get_pipeline()
+    pipe = get_pipeline(model_id)
     
     # Combine user prompt with style preset
     full_prompt = f"{prompt}, {style_preset}"
