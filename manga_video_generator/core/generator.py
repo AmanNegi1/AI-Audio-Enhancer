@@ -31,9 +31,37 @@ def get_pipeline(model_id="segmind/SSD-1B"):
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
-    PipelineClass = StableDiffusionXLPipeline if _is_sdxl(model_id) else StableDiffusionPipeline
+    PipelineClass = StableDiffusionXLPipeline if _is_xl(model_id) else StableDiffusionPipeline
 
-    msg = f"⏳ Loading image model {model_id} (First run may download model weights. Please wait)..."
+    def _is_xl(mid: str) -> bool:
+        return _is_sdxl(mid)
+
+    # Pre-download the model sequentially to prevent the parallel download hang on Windows
+    # and ignore redundant .bin files (saving 4+ GB of download time/size)
+    if "/" in model_id:
+        msg_dl = f"⏳ Downloading model files for {model_id} sequentially (ignoring redundant .bin)..."
+        try:
+            from huggingface_hub import snapshot_download
+            if is_in_streamlit():
+                with st.spinner(msg_dl):
+                    snapshot_download(
+                        repo_id=model_id,
+                        max_workers=1,
+                        ignore_patterns=["*.bin"],
+                        local_files_only=False
+                    )
+            else:
+                print(f"[GENERATOR] Pre-downloading {model_id} sequentially...")
+                snapshot_download(
+                    repo_id=model_id,
+                    max_workers=1,
+                    ignore_patterns=["*.bin"],
+                    local_files_only=False
+                )
+        except Exception as e:
+            print(f"[GENERATOR] Pre-download step finished/skipped: {e}")
+
+    msg = f"⏳ Initializing image model {model_id} into VRAM. Please wait..."
 
     if is_in_streamlit():
         with st.spinner(msg):
