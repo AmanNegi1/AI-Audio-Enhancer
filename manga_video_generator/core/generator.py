@@ -264,6 +264,11 @@ def generate_scene_image(
     image_backend="local",
     model_id="segmind/SSD-1B",
     api_key="",
+    lora_path=None,
+    lora_scale=0.8,
+    lora_trigger="",
+    ip_adapter_image=None,
+    ip_adapter_scale=0.6,
 ):
     """
     Generates a 16:9 image using local Diffusers, Gemini Imagen, OpenAI DALL-E, or mock mode.
@@ -305,8 +310,37 @@ def generate_scene_image(
         
     pipe = get_pipeline(model_id)
 
-    # Combine user prompt with style preset
-    full_prompt = f"{prompt}, {style_preset}"
+    # Load LoRA weights if provided
+    lora_loaded = False
+    if lora_path and os.path.exists(lora_path):
+        try:
+            pipe.load_lora_weights(lora_path)
+            lora_loaded = True
+        except Exception as e:
+            print(f"[WARNING] Could not load LoRA from {lora_path}: {e}")
+
+    # Load IP-Adapter if a reference image is provided
+    ip_adapter_loaded = False
+    if ip_adapter_image is not None:
+        try:
+            if _is_sdxl(model_id):
+                pipe.load_ip_adapter(
+                    "h94/IP-Adapter", subfolder="sdxl_models",
+                    weight_name="ip-adapter_sdxl.bin",
+                )
+            else:
+                pipe.load_ip_adapter(
+                    "h94/IP-Adapter", subfolder="models",
+                    weight_name="ip-adapter_sd15.bin",
+                )
+            pipe.set_ip_adapter_scale(ip_adapter_scale)
+            ip_adapter_loaded = True
+        except Exception as e:
+            print(f"[WARNING] Could not load IP-Adapter: {e}")
+
+    # Prepend trigger word when LoRA is active
+    trigger_prefix = f"{lora_trigger.strip()} " if (lora_loaded and lora_trigger.strip()) else ""
+    full_prompt = f"{trigger_prefix}{prompt}, {style_preset}"
     negative_prompt = "deformed, bad anatomy, disfigured, low contrast, low quality, blurry, text, watermark, signature"
 
     # SDXL: native 1024x576 (16:9), 12 fast steps
@@ -317,6 +351,9 @@ def generate_scene_image(
         width, height, steps = 768, 432, 20
 
     with torch.inference_mode():
+        _extra = {"cross_attention_kwargs": {"scale": lora_scale}} if lora_loaded else {}
+        if ip_adapter_loaded:
+            _extra["ip_adapter_image"] = ip_adapter_image
         image = pipe(
             prompt=full_prompt,
             negative_prompt=negative_prompt,
@@ -324,7 +361,20 @@ def generate_scene_image(
             guidance_scale=7.0,
             width=width,
             height=height,
+            **_extra,
         ).images[0]
+
+    # Unload adapters to keep the cached pipeline clean for the next call
+    if ip_adapter_loaded:
+        try:
+            pipe.unload_ip_adapter()
+        except Exception:
+            pass
+    if lora_loaded:
+        try:
+            pipe.unload_lora_weights()
+        except Exception:
+            pass
 
     # Upscale SD 1.5 output to standard 1024x576
     if not _is_sdxl(model_id):

@@ -25,13 +25,15 @@ def render_txt2img(tab_txt2img, TEMP_DIR, OUTPUT_DIR, hf_token):
                 "Select AI Image Model",
                 options=[
                     "segmind/SSD-1B (Fast, cached, 1.3B parameters)",
+                    "gsdf/CounterfeitXL (Anime SDXL)",
+                    "stablediffusionapi/anything-v5 (Anime SD 1.5)",
                     "Tongyi-MAI/Z-Image-Turbo (Distilled 6B parameter S3-DiT)",
                     "stabilityai/sdxl-turbo (Instant 1-step SDXL)",
                     "Custom Model ID (Hugging Face Repository Path)"
                 ],
                 index=0
             )
-            
+
             if "Custom Model" in t2i_model_choice:
                 t2i_model_id = st.text_input(
                     "Enter Hugging Face Model ID",
@@ -40,6 +42,10 @@ def render_txt2img(tab_txt2img, TEMP_DIR, OUTPUT_DIR, hf_token):
                 )
             elif "SSD-1B" in t2i_model_choice:
                 t2i_model_id = "segmind/SSD-1B"
+            elif "CounterfeitXL" in t2i_model_choice:
+                t2i_model_id = "gsdf/CounterfeitXL"
+            elif "anything-v5" in t2i_model_choice:
+                t2i_model_id = "stablediffusionapi/anything-v5"
             elif "Z-Image-Turbo" in t2i_model_choice:
                 t2i_model_id = "Tongyi-MAI/Z-Image-Turbo"
                 st.warning("⚠️ **Z-Image-Turbo is a 6B parameter model (~12 GB of weights)**. Loading it requires at least 20-24 GB of system RAM to prevent process crashes. If your laptop has 16 GB of RAM, this will likely crash the local server.")
