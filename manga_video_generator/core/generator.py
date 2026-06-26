@@ -31,10 +31,7 @@ def get_pipeline(model_id="segmind/SSD-1B"):
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
-    PipelineClass = StableDiffusionXLPipeline if _is_xl(model_id) else StableDiffusionPipeline
-
-    def _is_xl(mid: str) -> bool:
-        return _is_sdxl(mid)
+    PipelineClass = StableDiffusionXLPipeline if _is_sdxl(model_id) else StableDiffusionPipeline
 
     # Pre-download the model sequentially to prevent the parallel download hang on Windows
     # and ignore redundant .bin files (saving 4+ GB of download time/size)
