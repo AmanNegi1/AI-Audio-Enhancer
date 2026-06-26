@@ -887,9 +887,9 @@ with tab_panel_remix:
                 "Limit scenes for test run",
                 min_value=0,
                 max_value=30,
-                value=8,
+                value=0,
                 step=1,
-                help="Use 0 for all beats. Keep this small while tuning prompts and cost.",
+                help="Use 0 for all beats (recommended — generates an image for every audio beat). Set a small number only while quickly testing prompt quality or managing API cost.",
                 key="panel_remix_scene_limit"
             )
         with col_panel_limit_b:

@@ -115,95 +115,99 @@ def assemble_video(scenes, audio_path, output_path, add_captions=False):
     Assembles the generated images into a single video, synchronized with the audio track.
     Applies a dynamic Ken Burns zoom-in animation to each clip, aligned to its exact start timestamp.
     """
-    # 1. Determine active end time of the scenes to handle limited test runs gracefully
-    active_ends = []
+    # Collect valid scenes (images that were successfully generated)
+    valid_scene_items = []
     found_count = 0
     missing_count = 0
-    for scene in scenes:
+    for i, scene in enumerate(scenes):
         image_path = scene.get('image_path')
         if image_path and os.path.exists(image_path):
-            active_ends.append(scene.get('end', 5.0))
+            valid_scene_items.append((i, scene))
             found_count += 1
         else:
             missing_count += 1
-            
-    max_scene_end = max(active_ends) if active_ends else 0.0
-    
+
+    if not valid_scene_items:
+        raise ValueError("No valid image clips to assemble.")
+
+    max_scene_end = max(s.get('end', 5.0) for _, s in valid_scene_items)
+
     audio = AudioFileClip(audio_path)
     total_duration = audio.duration
-    
-    # Revert trimming logic: extend the last valid scene to fill the remaining duration of the video.
-    last_valid_scene_idx = -1
-    for i in range(len(scenes) - 1, -1, -1):
-        scene = scenes[i]
-        image_path = scene.get('image_path')
-        if image_path and os.path.exists(image_path):
-            last_valid_scene_idx = i
-            break
-            
-    if last_valid_scene_idx != -1:
-        orig_end = scenes[last_valid_scene_idx].get('end', 5.0)
-        scenes[last_valid_scene_idx]['original_end'] = orig_end
-        scenes[last_valid_scene_idx]['end'] = max(orig_end, total_duration)
-        print(f"[ASSEMBLER] Extended last valid scene #{last_valid_scene_idx+1} from {orig_end:.2f}s to {total_duration:.2f}s")
-        
+
     # Print status to terminal
     print(f"[ASSEMBLER] scenes count: {len(scenes)}, images found: {found_count}, missing: {missing_count}")
-    print(f"[ASSEMBLER] max_scene_end before extension: {max_scene_end}s, audio.duration: {audio.duration}s -> total_duration: {total_duration}s")
-    
+    print(f"[ASSEMBLER] max_scene_end: {max_scene_end:.2f}s, audio duration: {total_duration:.2f}s")
+    if max_scene_end < total_duration * 0.98:
+        print(f"[ASSEMBLER] Scenes cover {max_scene_end:.2f}s of {total_duration:.2f}s audio — will cycle images to fill remaining {total_duration - max_scene_end:.2f}s")
+
     # Display status in Streamlit if running inside a Streamlit app
     try:
         import streamlit as st
         if st.runtime.exists():
-            st.info(f"🎥 **Video Assembly Info:**\n"
-                    f"- Total scenes: {len(scenes)} (Images found: {found_count}, missing/skipped: {missing_count})\n"
-                    f"- Narration duration of scenes: {max_scene_end:.2f} seconds\n"
-                    f"- Audio file duration: {audio.duration:.2f} seconds\n"
-                    f"- **Final MP4 output duration:** {total_duration:.2f} seconds (extended last scene to match)")
+            fill_note = ""
+            if max_scene_end < total_duration * 0.98:
+                fill_note = f" The remaining {total_duration - max_scene_end:.1f}s will be covered by cycling the {found_count} generated images."
+            st.info(
+                f"🎥 **Video Assembly Info:**\n"
+                f"- Total scenes: {len(scenes)} (Images found: {found_count}, missing/skipped: {missing_count})\n"
+                f"- Scenes cover: {max_scene_end:.2f} seconds\n"
+                f"- Audio duration: {total_duration:.2f} seconds\n"
+                f"- **Final MP4 output duration:** {total_duration:.2f} seconds" + fill_note
+            )
     except ImportError:
         pass
-        
+
     audio = audio.with_duration(total_duration)
-    
+
     clips = []
     # Base background black clip
     background_clip = ColorClip(size=VIDEO_SIZE, color=(0, 0, 0)).with_duration(total_duration)
     clips.append(background_clip)
-    
-    for scene_index, scene in enumerate(scenes):
+
+    # Step 1: Add all generated scenes at their proper timestamps
+    for scene_index, scene in valid_scene_items:
         image_path = scene.get('image_path')
-        if not image_path or not os.path.exists(image_path):
-            continue
-            
         start = scene.get('start', 0.0)
         end = scene.get('end', 5.0)
-        
-        # If the scene starts after the total duration, skip it
+
         if start >= total_duration:
             continue
-            
-        # Limit end time to total duration
+
         end = min(end, total_duration)
         duration = max(0.1, end - start)
-        
+
         animated_clip = create_keyframed_image_clip(image_path, duration, scene_index, scene.get('motion', 'auto'))
         if add_captions:
             caption_text = scene.get('caption') or scene.get('text_segment', '')
             if caption_text.strip():
-                # The caption should only show for the original duration of the segment,
-                # even if the visual image duration was extended.
-                orig_end_val = scene.get('original_end', end)
-                caption_duration = min(duration, max(0.1, orig_end_val - start))
-                caption_clip = create_caption_clip(caption_text, caption_duration)
+                caption_clip = create_caption_clip(caption_text, duration)
                 animated_clip = CompositeVideoClip([animated_clip, caption_clip], size=VIDEO_SIZE).with_duration(duration)
-        
-        # Position the clip at its absolute start time
-        positioned_clip = animated_clip.with_start(start)
-        clips.append(positioned_clip)
-        
-    if len(clips) <= 1:
-        audio.close()
-        raise ValueError("No valid image clips to assemble.")
+
+        clips.append(animated_clip.with_start(start))
+
+    # Step 2: If scenes don't cover the full audio, cycle through all generated images
+    # to fill the remaining time instead of freezing on the last frame.
+    if max_scene_end < total_duration * 0.98:
+        avg_beat_duration = max_scene_end / max(found_count, 1)
+        fill_seg_duration = min(max(avg_beat_duration, 2.0), 5.0)
+
+        fill_start = max_scene_end
+        fill_cycle_idx = 0
+        while fill_start < total_duration - 0.05:
+            _, fill_scene = valid_scene_items[fill_cycle_idx % len(valid_scene_items)]
+            fill_end = min(fill_start + fill_seg_duration, total_duration)
+            fill_duration = max(0.1, fill_end - fill_start)
+
+            fill_clip = create_keyframed_image_clip(
+                fill_scene['image_path'],
+                fill_duration,
+                fill_cycle_idx,
+                fill_scene.get('motion', 'auto')
+            )
+            clips.append(fill_clip.with_start(fill_start))
+            fill_start = fill_end
+            fill_cycle_idx += 1
         
     # Composite all clips over the background
     final_video = CompositeVideoClip(clips, size=VIDEO_SIZE).with_duration(total_duration)
