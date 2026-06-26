@@ -59,7 +59,7 @@ class OpenAIKeyManager:
             pass
 
         if not is_streamlit:
-            return passed_key if passed_key else os.environ.get("OPENAI_API_KEY", OPENAI_KEYS[0]["key"])
+            return passed_key if passed_key else os.environ.get("OPENAI_API_KEY", OPENAI_KEYS[0]["key"] if OPENAI_KEYS else "")
 
         OpenAIKeyManager.initialize()
 
@@ -86,8 +86,9 @@ class OpenAIKeyManager:
             if statuses[check_idx]["status"] == "Active":
                 st.session_state["openai_current_key_index"] = check_idx
                 return statuses[check_idx]["key"]
-                
-        return OPENAI_KEYS[0]["key"]
+
+        # All keys exhausted — return first pool key as last-resort, or empty string if pool is empty
+        return OPENAI_KEYS[0]["key"] if OPENAI_KEYS else ""
 
     @staticmethod
     def mark_key_exhausted(key_val):
@@ -192,7 +193,10 @@ def run_with_openai_rotation(api_call_fn, passed_key=None):
         OpenAIKeyManager.get_active_key(passed_key=passed_key)
 
     for attempt in range(max_attempts):
-        active_key = OpenAIKeyManager.get_active_key()
+        # Forward passed_key on every iteration so non-Streamlit context can resolve it correctly
+        active_key = OpenAIKeyManager.get_active_key(passed_key=passed_key if attempt == 0 else None)
+        if not active_key:
+            raise Exception("No OpenAI API key available. Please enter your key in the sidebar API Setup section.")
         
         for transient_attempt in range(3):
             try:

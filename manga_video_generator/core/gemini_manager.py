@@ -62,7 +62,7 @@ class GeminiKeyManager:
 
         if not is_streamlit:
             # Standalone/CLI fallback: just return passed_key or ENV or first default key
-            return passed_key if passed_key else os.environ.get("GEMINI_API_KEY", GEMINI_KEYS[0]["key"])
+            return passed_key if passed_key else os.environ.get("GEMINI_API_KEY", GEMINI_KEYS[0]["key"] if GEMINI_KEYS else "")
 
         GeminiKeyManager.initialize()
 
@@ -92,9 +92,9 @@ class GeminiKeyManager:
             if statuses[check_idx]["status"] == "Active":
                 st.session_state["current_key_index"] = check_idx
                 return statuses[check_idx]["key"]
-                
-        # If all keys are exhausted, return the first key in the pool as a fallback
-        return GEMINI_KEYS[0]["key"]
+
+        # All keys exhausted — return first pool key as last-resort, or empty string if pool is empty
+        return GEMINI_KEYS[0]["key"] if GEMINI_KEYS else ""
 
     @staticmethod
     def mark_key_exhausted(key_val):
@@ -135,11 +135,13 @@ class GeminiKeyManager:
 
     @staticmethod
     def is_quota_error(exc):
-        """Determines if the exception was caused by a quota/rate limit error or lack of access/paid plan."""
+        """Determines if the exception was caused by a quota/rate limit error.
+        NOTE: 404 NOT_FOUND (model unavailable) is intentionally excluded — rotating keys
+        won't fix a missing model, so those errors are raised immediately."""
         err_msg = str(exc).lower()
         keywords = [
             "quota", "exhausted", "limit", "429", "rate", "resource_exhausted",
-            "paid plans", "upgrade your account", "not found", "not supported"
+            "paid plans", "upgrade your account"
         ]
         return any(kw in err_msg for kw in keywords)
 
@@ -187,7 +189,10 @@ def run_with_rotation(api_call_fn, passed_key=None):
         GeminiKeyManager.get_active_key(passed_key=passed_key)
 
     for attempt in range(max_attempts):
-        active_key = GeminiKeyManager.get_active_key()
+        # Forward passed_key on first iteration so non-Streamlit context can resolve it correctly
+        active_key = GeminiKeyManager.get_active_key(passed_key=passed_key if attempt == 0 else None)
+        if not active_key:
+            raise Exception("No Gemini API key available. Please enter your key in the sidebar API Setup section.")
         
         # Retry transient rate limits up to 3 times per key
         for transient_attempt in range(3):

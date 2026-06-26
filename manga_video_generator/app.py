@@ -355,6 +355,8 @@ with tab_recap:
             "Image generation model for video",
             options=[
                 "Local GPU - segmind/SSD-1B",
+                "Local GPU - Anything V5 (anime SD1.5)",
+                "Local GPU - CounterfeitXL (anime SDXL)",
                 "Gemini API - Imagen 3",
                 "Local GPU - Custom Hugging Face model",
             ],
@@ -364,6 +366,14 @@ with tab_recap:
             recap_image_backend = "gemini"
             recap_image_model_id = "imagen-4.0-generate-001"
             st.caption("Uses your Gemini API key for cloud image generation. Good fallback when local SDXL images are weak.")
+        elif image_backend_choice == "Local GPU - Anything V5 (anime SD1.5)":
+            recap_image_backend = "local"
+            recap_image_model_id = "stablediffusionapi/anything-v5"
+            st.caption("SD 1.5-based anime model. Great for stylized manga art. Lower VRAM than SDXL (~4GB).")
+        elif image_backend_choice == "Local GPU - CounterfeitXL (anime SDXL)":
+            recap_image_backend = "local"
+            recap_image_model_id = "gsdf/CounterfeitXL"
+            st.caption("SDXL-based anime model with high detail and consistent character rendering.")
         elif image_backend_choice == "Local GPU - Custom Hugging Face model":
             recap_image_backend = "local"
             recap_image_model_id = st.text_input(
@@ -593,6 +603,8 @@ with tab_audio_first:
             "Image generation model for video",
             options=[
                 "Local GPU - segmind/SSD-1B",
+                "Local GPU - Anything V5 (anime SD1.5)",
+                "Local GPU - CounterfeitXL (anime SDXL)",
                 "Gemini API - Imagen 3",
                 "Local GPU - Custom Hugging Face model",
             ],
@@ -602,6 +614,14 @@ with tab_audio_first:
             audio_first_image_backend = "gemini"
             audio_first_image_model_id = "imagen-4.0-generate-001"
             st.caption("Uses your Gemini API key for cloud image generation. Keep scene limits low while testing cost/quality.")
+        elif audio_first_image_backend_choice == "Local GPU - Anything V5 (anime SD1.5)":
+            audio_first_image_backend = "local"
+            audio_first_image_model_id = "stablediffusionapi/anything-v5"
+            st.caption("SD 1.5-based anime model. Great for stylized manga art. Lower VRAM than SDXL (~4GB).")
+        elif audio_first_image_backend_choice == "Local GPU - CounterfeitXL (anime SDXL)":
+            audio_first_image_backend = "local"
+            audio_first_image_model_id = "gsdf/CounterfeitXL"
+            st.caption("SDXL-based anime model with high detail and consistent character rendering.")
         elif audio_first_image_backend_choice == "Local GPU - Custom Hugging Face model":
             audio_first_image_backend = "local"
             audio_first_image_model_id = st.text_input(
@@ -844,6 +864,8 @@ with tab_panel_remix:
             "Image generation model",
             options=[
                 "Local GPU - segmind/SSD-1B",
+                "Local GPU - Anything V5 (anime SD1.5)",
+                "Local GPU - CounterfeitXL (anime SDXL)",
                 "Gemini API - Imagen",
                 "OpenAI API - DALL-E 3",
                 "Local GPU - Custom Hugging Face model",
@@ -868,6 +890,16 @@ with tab_panel_remix:
                 type="password",
                 key="panel_remix_image_key"
             )
+        elif panel_image_backend_choice == "Local GPU - Anything V5 (anime SD1.5)":
+            panel_image_backend = "local"
+            panel_image_model_id = "stablediffusionapi/anything-v5"
+            panel_image_api_key = ""
+            st.caption("SD 1.5-based anime model. Great for stylized manga art. Lower VRAM than SDXL (~4GB).")
+        elif panel_image_backend_choice == "Local GPU - CounterfeitXL (anime SDXL)":
+            panel_image_backend = "local"
+            panel_image_model_id = "gsdf/CounterfeitXL"
+            panel_image_api_key = ""
+            st.caption("SDXL-based anime model with high detail and consistent character rendering.")
         elif panel_image_backend_choice == "Local GPU - Custom Hugging Face model":
             panel_image_backend = "local"
             panel_image_model_id = st.text_input(

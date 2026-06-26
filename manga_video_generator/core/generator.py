@@ -1,9 +1,19 @@
 import torch
-from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
+from diffusers import StableDiffusionXLPipeline, StableDiffusionPipeline, DPMSolverMultistepScheduler
 import streamlit as st
 import os
 import base64
 from io import BytesIO
+
+# SD 1.5-based models (non-SDXL) — require StableDiffusionPipeline and smaller resolution
+_SD15_MODEL_IDS = {
+    "stablediffusionapi/anything-v5",
+    "anything-v5",
+}
+
+def _is_sdxl(model_id: str) -> bool:
+    return model_id.lower() not in {m.lower() for m in _SD15_MODEL_IDS}
+
 
 # Helper to check if running inside Streamlit
 def is_in_streamlit():
@@ -16,17 +26,18 @@ def is_in_streamlit():
 @st.cache_resource
 def get_pipeline(model_id="segmind/SSD-1B"):
     """
-    Loads and caches the Stable Diffusion XL pipeline.
+    Loads and caches the Stable Diffusion pipeline (SDXL or SD 1.5).
     Optimizes for 8GB VRAM (RTX 4060) using float16 and attention slicing.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
-    
+    PipelineClass = StableDiffusionXLPipeline if _is_sdxl(model_id) else StableDiffusionPipeline
+
     msg = f"⏳ Loading image model {model_id} (First run may download model weights. Please wait)..."
-    
+
     if is_in_streamlit():
         with st.spinner(msg):
-            pipeline = StableDiffusionXLPipeline.from_pretrained(
+            pipeline = PipelineClass.from_pretrained(
                 model_id,
                 torch_dtype=dtype,
                 use_safetensors=True,
@@ -37,7 +48,7 @@ def get_pipeline(model_id="segmind/SSD-1B"):
             if device == "cuda":
                 pipeline.enable_attention_slicing()
     else:
-        pipeline = StableDiffusionXLPipeline.from_pretrained(
+        pipeline = PipelineClass.from_pretrained(
             model_id,
             torch_dtype=dtype,
             use_safetensors=True,
@@ -47,17 +58,16 @@ def get_pipeline(model_id="segmind/SSD-1B"):
         pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
         if device == "cuda":
             pipeline.enable_attention_slicing()
-            
+
     return pipeline
 
 from PIL import Image, ImageDraw
 
 GEMINI_IMAGE_MODELS = [
     "imagen-4.0-generate-001",
-    "imagen-4.0-ultra-generate-001",
     "imagen-4.0-fast-generate-001",
+    "imagen-4.0-ultra-generate-001",
     "imagen-3.0-generate-001",
-    "imagen-3.0-generate-002",
 ]
 
 def generate_mock_image(prompt):
@@ -117,6 +127,7 @@ def generate_gemini_image(prompt, style_preset, api_key, model_id="imagen-4.0-ge
     def _call_gemini_image(key):
         client = genai.Client(api_key=key.strip())
         last_err = None
+        not_found_models = []
         for candidate_model_id in model_candidates:
             try:
                 response = client.models.generate_images(
@@ -126,8 +137,20 @@ def generate_gemini_image(prompt, style_preset, api_key, model_id="imagen-4.0-ge
                 )
                 return response
             except Exception as error:
-                last_err = error
-        raise last_err
+                err_str = str(error).lower()
+                if "not_found" in err_str or "not found" in err_str or "404" in err_str:
+                    not_found_models.append(candidate_model_id)
+                    last_err = error
+                else:
+                    # Non-404 error (quota, auth, etc.) — let rotation handle it
+                    raise error
+        # All models returned 404 — this is a model access issue, not a key quota issue
+        raise ValueError(
+            f"None of the Imagen models are accessible with this API key. "
+            f"Models tried: {not_found_models}. "
+            "Imagen requires a paid Google Cloud / AI Studio billing account. "
+            f"Last error: {last_err}"
+        )
 
     try:
         response = run_with_rotation(_call_gemini_image)
@@ -256,21 +279,31 @@ def generate_scene_image(
                 return generate_mock_image(prompt)
         
     pipe = get_pipeline(model_id)
-    
+
     # Combine user prompt with style preset
     full_prompt = f"{prompt}, {style_preset}"
     negative_prompt = "deformed, bad anatomy, disfigured, low contrast, low quality, blurry, text, watermark, signature"
-    
-    # Generate image (1024x576 is native 16:9 for SDXL)
-    # Using 12 steps with DPM solver is extremely fast and high-quality
+
+    # SDXL: native 1024x576 (16:9), 12 fast steps
+    # SD 1.5: native 768x432 (16:9), 20 steps for quality, then upscale
+    if _is_sdxl(model_id):
+        width, height, steps = 1024, 576, 12
+    else:
+        width, height, steps = 768, 432, 20
+
     with torch.inference_mode():
         image = pipe(
             prompt=full_prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=12,
+            num_inference_steps=steps,
             guidance_scale=7.0,
-            width=1024,
-            height=576
+            width=width,
+            height=height,
         ).images[0]
-        
+
+    # Upscale SD 1.5 output to standard 1024x576
+    if not _is_sdxl(model_id):
+        from PIL import Image as PILImage
+        image = image.resize((1024, 576), PILImage.LANCZOS)
+
     return image

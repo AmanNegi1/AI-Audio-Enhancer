@@ -76,6 +76,82 @@ def parse_json_response(text):
         raise e
 
 
+def build_batch_instruction(scenes, n_panels, detail_strength, art_style, originality_strength):
+    detail_rule = DETAIL_PROFILES.get(detail_strength, DETAIL_PROFILES["High"])
+    n_scenes = len(scenes)
+    beats_text = "\n".join(
+        f"Beat {i + 1}: {scene.get('text_segment', 'No narration')}"
+        for i, scene in enumerate(scenes)
+    )
+    return (
+        f"You are analyzing {n_panels} black-and-white manga panels (uploaded below, in order) as private storyboard references. "
+        f"Generate {n_scenes} original image-generation prompts for a YouTube anime recap video — one per narration beat.\n\n"
+        f"Narration beats:\n{beats_text}\n\n"
+        "Rules:\n"
+        "- Do not copy exact panel composition, line art, character identity, costumes, logos, text, speech bubbles, or recognizable named characters.\n"
+        f"- Originality strength: {originality_strength}/100. Redesign faces, hair, clothing, props, setting, and framing while preserving only the broad story function.\n"
+        "- Map each beat to the most relevant panel based on narrative arc position. Record which panel you used in source_panel_index (0-based).\n"
+        "- CRITICAL: Keep character appearance, setting style, and color palette CONSISTENT across ALL prompts. "
+        "Use the same redesigned character descriptions (hair, outfit, build, weapon) every time that character appears.\n\n"
+        f"Art direction for all images: {art_style}. {detail_rule}\n\n"
+        "Each image_prompt must include: subject, redesigned character appearance, action, setting, emotion, camera angle, "
+        "composition, lighting, colors, atmosphere. End every prompt with: no text, no watermark, no speech bubbles, no copied panel composition.\n\n"
+        f"Return ONLY a valid JSON array of exactly {n_scenes} objects. Each object must have:\n"
+        '- "panel_description": brief description of the source panel action/mood (no character names)\n'
+        '- "image_prompt": the full image generation prompt\n'
+        '- "source_panel_index": integer, 0-based index of the panel you referenced\n\n'
+        "Do not use unescaped double quotes inside JSON string values. Use single quotes for any inner dialogue."
+    )
+
+
+def analyze_all_panels_with_gemini(panel_images, scenes, api_key, detail_strength, art_style, originality_strength):
+    import google.generativeai as genai
+    from core.gemini_manager import run_with_rotation
+
+    instruction = build_batch_instruction(scenes, len(panel_images), detail_strength, art_style, originality_strength)
+
+    models_to_try = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-flash-latest",
+    ]
+
+    def _call_gemini(key):
+        genai.configure(api_key=key.strip())
+        last_err = None
+        for name in models_to_try:
+            try:
+                model = genai.GenerativeModel(name)
+                content_parts = [instruction] + [img.convert("RGB") for img in panel_images]
+                response = model.generate_content(
+                    content_parts,
+                    generation_config={"response_mime_type": "application/json"},
+                    safety_settings=[],
+                )
+                return response
+            except Exception as error:
+                last_err = error
+        raise last_err
+
+    response = run_with_rotation(_call_gemini)
+
+    cleaned = response.text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+
+    result = json.loads(cleaned)
+    if isinstance(result, dict):
+        for v in result.values():
+            if isinstance(v, list):
+                result = v
+                break
+    return result
+
+
 def analyze_panel_with_gemini(image, api_key, narration, detail_strength, art_style, originality_strength, model_name="gemini-2.0-flash"):
     import google.generativeai as genai
     from core.gemini_manager import run_with_rotation
@@ -221,18 +297,54 @@ def create_panel_remix_scenes(
     if not scenes:
         scenes, transcript_text = build_text_scenes(narration_text, max_duration, max_words=max_words)
 
-    for index, scene in enumerate(scenes):
-        image = panel_images[index % len(panel_images)]
-        narration = scene.get("text_segment", "")
-        if not api_key.strip():
-            analysis = fallback_panel_prompt(narration, art_style, detail_strength, originality_strength)
-        elif analyzer_backend == "openai":
-            analysis = analyze_panel_with_openai(image, api_key, narration, detail_strength, art_style, originality_strength, model_name=openai_model)
-        else:
-            analysis = analyze_panel_with_gemini(image, api_key, narration, detail_strength, art_style, originality_strength)
+    # --- Batched Gemini analysis (one call sees all panels + all beats → consistent characters) ---
+    batch_results = None
+    if api_key.strip() and analyzer_backend == "gemini":
+        try:
+            batch_results = analyze_all_panels_with_gemini(
+                panel_images, scenes, api_key, detail_strength, art_style, originality_strength
+            )
+            if not isinstance(batch_results, list) or len(batch_results) != len(scenes):
+                batch_results = None  # unexpected shape → fall back to per-scene
+        except Exception:
+            batch_results = None  # any failure → fall back to per-scene
 
-        scene["source_panel_index"] = index % len(panel_images)
-        scene["panel_description"] = analysis.get("panel_description", "").strip()
-        scene["image_prompt"] = analysis.get("image_prompt", "").strip() or fallback_panel_prompt(narration, art_style, detail_strength, originality_strength)["image_prompt"]
+    for index, scene in enumerate(scenes):
+        narration = scene.get("text_segment", "")
+
+        if batch_results is not None:
+            result = batch_results[index]
+            scene["source_panel_index"] = min(
+                int(result.get("source_panel_index", index % len(panel_images))),
+                len(panel_images) - 1,
+            )
+            scene["panel_description"] = result.get("panel_description", "").strip()
+            scene["image_prompt"] = result.get("image_prompt", "").strip() or fallback_panel_prompt(narration, art_style, detail_strength, originality_strength)["image_prompt"]
+        else:
+            # Per-scene fallback: narrative position mapping instead of naive cycling
+            panel_idx = min(int(index / len(scenes) * len(panel_images)), len(panel_images) - 1)
+            image = panel_images[panel_idx]
+            if not api_key.strip():
+                analysis = fallback_panel_prompt(narration, art_style, detail_strength, originality_strength)
+            elif analyzer_backend == "openai":
+                analysis = analyze_panel_with_openai(image, api_key, narration, detail_strength, art_style, originality_strength, model_name=openai_model)
+            else:
+                analysis = analyze_panel_with_gemini(image, api_key, narration, detail_strength, art_style, originality_strength)
+
+            scene["source_panel_index"] = panel_idx
+            scene["panel_description"] = analysis.get("panel_description", "").strip()
+            scene["image_prompt"] = analysis.get("image_prompt", "").strip() or fallback_panel_prompt(narration, art_style, detail_strength, originality_strength)["image_prompt"]
+
+    # --- Group consecutive beats that reference the same panel → one image per panel segment ---
+    # This reduces 67 beats (for 5-min audio) down to ~15-20 groups matching the panel count,
+    # dramatically cutting image generation cost while keeping audio sync intact.
+    grouped = []
+    for scene in scenes:
+        if grouped and grouped[-1]["source_panel_index"] == scene["source_panel_index"]:
+            grouped[-1]["end"] = scene["end"]
+            grouped[-1]["text_segment"] = grouped[-1]["text_segment"] + " " + scene["text_segment"]
+        else:
+            grouped.append(dict(scene))
+    scenes = grouped
 
     return scenes, transcript_text

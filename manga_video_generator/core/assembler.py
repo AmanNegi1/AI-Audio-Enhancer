@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 VIDEO_SIZE = (1920, 1080)
+FADE_DURATION = 0.35  # seconds of cross-dissolve overlap between clips
 
 def ease_in_out(progress):
     progress = max(0.0, min(1.0, progress))
@@ -66,6 +67,15 @@ def create_keyframed_image_clip(image_path, duration, scene_index, motion="auto"
         return np.array(cropped_img)
 
     return VideoClip(make_frame, duration=duration)
+
+
+def make_fade_in_mask(fade_duration, total_duration):
+    """Returns a mask clip that fades opacity from 0 to 1 over fade_duration seconds."""
+    def make_frame(t):
+        opacity = min(1.0, t / max(fade_duration, 0.001))
+        return np.full((VIDEO_SIZE[1], VIDEO_SIZE[0]), opacity)
+    return VideoClip(make_frame, duration=total_duration, is_mask=True)
+
 
 def create_caption_clip(text, duration):
     caption_height = 210
@@ -165,7 +175,9 @@ def assemble_video(scenes, audio_path, output_path, add_captions=False):
     background_clip = ColorClip(size=VIDEO_SIZE, color=(0, 0, 0)).with_duration(total_duration)
     clips.append(background_clip)
 
-    # Step 1: Add all generated scenes at their proper timestamps
+    # Step 1: Add all generated scenes at their proper timestamps with cross-dissolve transitions.
+    # Each clip starts FADE_DURATION seconds early and fades in from transparent, so clips overlap
+    # and dissolve into each other rather than hard-cutting.
     for scene_index, scene in valid_scene_items:
         image_path = scene.get('image_path')
         start = scene.get('start', 0.0)
@@ -177,14 +189,24 @@ def assemble_video(scenes, audio_path, output_path, add_captions=False):
         end = min(end, total_duration)
         duration = max(0.1, end - start)
 
-        animated_clip = create_keyframed_image_clip(image_path, duration, scene_index, scene.get('motion', 'auto'))
+        # Cross-dissolve: extend clip start backward by fade amount so it overlaps with previous
+        fade_in = min(FADE_DURATION, start)  # can't start before t=0
+        clip_start = max(0.0, start - fade_in)
+        clip_duration = duration + fade_in
+
+        animated_clip = create_keyframed_image_clip(image_path, clip_duration, scene_index, scene.get('motion', 'auto'))
+
+        # Apply fade-in mask so clip dissolves in over the previous one
+        if fade_in > 0.05:
+            animated_clip = animated_clip.with_mask(make_fade_in_mask(fade_in, clip_duration))
+
         if add_captions:
             caption_text = scene.get('caption') or scene.get('text_segment', '')
             if caption_text.strip():
-                caption_clip = create_caption_clip(caption_text, duration)
-                animated_clip = CompositeVideoClip([animated_clip, caption_clip], size=VIDEO_SIZE).with_duration(duration)
+                caption_clip = create_caption_clip(caption_text, clip_duration)
+                animated_clip = CompositeVideoClip([animated_clip, caption_clip], size=VIDEO_SIZE).with_duration(clip_duration)
 
-        clips.append(animated_clip.with_start(start))
+        clips.append(animated_clip.with_start(clip_start))
 
     # Step 2: If scenes don't cover the full audio, cycle through all generated images
     # to fill the remaining time instead of freezing on the last frame.
@@ -205,6 +227,8 @@ def assemble_video(scenes, audio_path, output_path, add_captions=False):
                 fill_cycle_idx,
                 fill_scene.get('motion', 'auto')
             )
+            if fill_start > 0.05:
+                fill_clip = fill_clip.with_mask(make_fade_in_mask(min(FADE_DURATION, fill_duration * 0.4), fill_duration))
             clips.append(fill_clip.with_start(fill_start))
             fill_start = fill_end
             fill_cycle_idx += 1
