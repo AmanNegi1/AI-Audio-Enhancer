@@ -5,29 +5,6 @@ import shutil
 import json
 from pathlib import Path
 
-# Safe guard against torchaudio C++ DLL mismatch
-try:
-    import torchaudio
-except Exception:
-    import types
-    import importlib.machinery
-    mod = types.ModuleType("torchaudio")
-    mod.__spec__ = importlib.machinery.ModuleSpec("torchaudio", None)
-    sys.modules["torchaudio"] = mod
-
-# Safeguard for PyTorch 2.6+ weights_only issue with Bark model loading
-import torch
-_orig_torch_load = torch.load
-def _patched_torch_load(*args, **kwargs):
-    try:
-        return _orig_torch_load(*args, **kwargs)
-    except Exception:
-        if "weights_only" not in kwargs:
-            kwargs["weights_only"] = False
-            return _orig_torch_load(*args, **kwargs)
-        raise
-torch.load = _patched_torch_load
-
 # Load .env file manually if it exists
 ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 if os.path.exists(ENV_PATH):
@@ -56,7 +33,6 @@ from PIL import Image
 from core.parser import parse_script_to_prompts, refine_scene_pacing
 from core.aligner import align_audio_segments
 from core.generator import generate_scene_image
-from core.tts_manager import generate_tts, OPENAI_VOICES, BARK_PRESETS
 from core.custom_generator import generate_custom_image
 from core.assembler import assemble_video
 from core.audio_first_recaper import create_audio_first_scenes
@@ -290,7 +266,7 @@ with st.sidebar:
 st.title("🚀 AI Creative Studio & Recap Engine")
 
 tab_recap, tab_audio_first, tab_panel_remix, tab_txt2img, tab_chat, tab_txt2vid, tab_img2vid, tab_lora = st.tabs([
-    "🎬 Script to Video",
+    "🎬 Manga Video Recap Generator",
     "🎧 Audio-First YouTube Studio",
     "🧩 Panel Remix Studio",
     "🎨 Text to Image",
@@ -300,59 +276,8 @@ tab_recap, tab_audio_first, tab_panel_remix, tab_txt2img, tab_chat, tab_txt2vid,
     "🧬 LoRA Training Studio",
 ])
 
-_CONTENT_STYLE_PRESETS = {
-    "🍌 Manga / Anime Recap": [
-        "anime style, highly detailed digital painting, vibrant color scheme, 16:9 aspect ratio",
-        "dark cinematic manga art, dramatic shadows, inked energy, expressive character acting, 16:9 aspect ratio",
-        "cyberpunk neon anime illustration, glowing accents, dark shadows, heavy ink contours, 16:9 aspect ratio",
-        "watercolor manga sketch, soft pastel colors, hand-drawn paper texture, expressive lines, 16:9 aspect ratio",
-    ],
-    "📚 Educational / Explainer": [
-        "clean modern explainer illustration, bright professional lighting, clear focal subject, 16:9 aspect ratio",
-        "minimalist flat design, bold colors, simple shapes, educational diagram style, 16:9 aspect ratio",
-        "isometric 3D illustration, professional editorial style, vibrant accent colors, 16:9 aspect ratio",
-        "realistic digital painting, clear visual metaphor, professional studio lighting, 16:9 aspect ratio",
-    ],
-    "😱 Horror / Thriller": [
-        "dark atmospheric horror, deep shadows, desaturated color palette, ominous fog, cinematic, 16:9 aspect ratio",
-        "psychological thriller, cold blue and grey tones, distorted perspective, tense composition, 16:9 aspect ratio",
-        "gothic horror illustration, candlelight glow, dark Victorian setting, eerie atmosphere, 16:9 aspect ratio",
-        "found footage aesthetic, grainy film texture, low light, unsettling composition, 16:9 aspect ratio",
-    ],
-    "🏛️ Documentary / History": [
-        "cinematic documentary photography, natural light, authentic environment, warm film grade, 16:9 aspect ratio",
-        "historical realism illustration, period-accurate details, muted earthy tones, dramatic natural lighting, 16:9 aspect ratio",
-        "photojournalistic style, candid composition, documentary realism, strong contrast, 16:9 aspect ratio",
-        "epic historical painting style, dramatic sky, heroic composition, rich warm colors, 16:9 aspect ratio",
-    ],
-    "🎤 Podcast / Story": [
-        "cinematic storytelling, warm intimate lighting, character-focused composition, film still aesthetic, 16:9 aspect ratio",
-        "graphic novel illustration, bold outlines, expressive character art, dynamic composition, 16:9 aspect ratio",
-        "atmospheric digital painting, moody color palette, narrative scene, cinematic widescreen, 16:9 aspect ratio",
-        "indie film aesthetic, natural color grading, candid composition, storytelling focus, 16:9 aspect ratio",
-    ],
-    "💼 Tech / Business": [
-        "sleek modern tech illustration, clean lines, blue and white palette, professional studio, 16:9 aspect ratio",
-        "futuristic digital concept art, holographic UI elements, glowing accents, dark background, 16:9 aspect ratio",
-        "minimal corporate editorial style, polished composition, premium lighting, sharp details, 16:9 aspect ratio",
-        "abstract data visualization art, flowing gradient lines, tech aesthetic, 16:9 aspect ratio",
-    ],
-    "🌟 Motivation / Self-Help": [
-        "inspirational cinematic landscape, golden hour lighting, expansive vista, uplifting mood, 16:9 aspect ratio",
-        "bold motivational composition, warm vibrant colors, dynamic human subject, 16:9 aspect ratio",
-        "surreal conceptual illustration, bright hopeful colors, dreamlike metaphor, 16:9 aspect ratio",
-        "cinematic portrait, determined expression, dramatic backlit lighting, powerful composition, 16:9 aspect ratio",
-    ],
-    "🎵 Cinematic / Music Video": [
-        "cinematic film still, anamorphic lens flare, moody color grade, dramatic lighting, 16:9 aspect ratio",
-        "music video aesthetic, bold neon colors, dynamic motion blur, urban setting, 16:9 aspect ratio",
-        "abstract visual art, flowing colors, rhythmic surreal composition, dreamlike, 16:9 aspect ratio",
-        "dark cinematic portrait, backlit silhouette, foggy atmosphere, film noir aesthetic, 16:9 aspect ratio",
-    ],
-}
-
 with tab_recap:
-    st.write("Convert any script — manga recap, education, horror, podcast — into a fully voiced AI video.")
+    st.write("Convert voiceovers and scripts into moving anime-style videos.")
     
     col_input, col_result = st.columns([1, 1])
     
@@ -397,60 +322,51 @@ with tab_recap:
                 type=["mp3", "wav", "m4a", "mpeg"]
             )
         
-        # TTS controls (visible only when no audio is uploaded)
+        # TTS backend selector (shown only when no audio is uploaded)
         if not st.session_state.get("use_demo_audio", False) and audio_file is None:
+            from core.tts_manager import OPENAI_VOICES, BARK_PRESETS
             tts_backend = st.selectbox(
-                "Auto-generate voiceover engine",
+                "🔊 Auto-generate voiceover engine",
                 options=["gtts", "openai", "bark"],
                 format_func=lambda x: {
-                    "gtts": "gTTS (free, basic quality)",
+                    "gtts": "gTTS (free, Indian English accent)",
                     "openai": "OpenAI TTS (tts-1-hd, high quality)",
                     "bark": "Bark (local GPU, very expressive — slow)",
                 }[x],
-                index=0,
                 key="recap_tts_backend",
             )
             if tts_backend == "openai":
-                tts_voice = st.selectbox(
-                    "Voice", OPENAI_VOICES, index=0, key="recap_tts_voice_openai",
-                    help="onyx/echo are deep narrative voices. nova/shimmer are lighter.",
-                )
+                tts_voice = st.selectbox("Voice", OPENAI_VOICES, index=0, key="recap_tts_voice_openai",
+                    help="onyx/echo are deep narrative voices.")
                 st.caption("Uses your OpenAI key. Works with any language text.")
             elif tts_backend == "bark":
-                tts_voice = st.selectbox(
-                    "Speaker preset", BARK_PRESETS, index=0, key="recap_tts_voice_bark",
-                    help="Runs locally on GPU. ~30-60s per sentence. Very expressive.",
-                )
-                st.caption("⚠️ Requires: `pip install git+https://github.com/suno-ai/bark.git scipy`")
+                tts_voice = st.selectbox("Speaker preset", BARK_PRESETS, index=0, key="recap_tts_voice_bark",
+                    help="Runs locally on GPU. ~30-60s per sentence. Very expressive.")
+                st.caption("⚠️ Long scripts are auto-split into sentence chunks to avoid the 13s truncation limit.")
             else:
                 tts_voice = None
         else:
             tts_backend = "gtts"
-            tts_voice = None
+            tts_voice = None  # won't be used if audio is uploaded
         
-        # 2. Content type
-        recap_content_type = st.selectbox(
-            "Content type",
-            options=list(_CONTENT_STYLE_PRESETS.keys()),
-            index=0,
-            key="recap_content_type",
-            help="Controls the AI director persona and visual style direction for every generated scene.",
-        )
-
-        # 3. Script Input
+        # 2. Script Input
         script_text = st.text_area(
-            "Paste your script",
+            "Paste Script (use double-line breaks to outline new paragraphs/scene ideas)",
             value=st.session_state["script_text"],
             height=250,
-            placeholder="Paste any script — manga recap, educational explainer, horror story, podcast transcript..."
+            placeholder="Paragraph 1 description...\n\nParagraph 2 description..."
         )
         st.session_state["script_text"] = script_text
-
-        # 4. Style Presets (dynamic per content type)
+        
+        # 3. Style Presets
         style_preset = st.selectbox(
             "Select Art Style preset",
-            options=_CONTENT_STYLE_PRESETS[recap_content_type],
-            key="recap_style_preset",
+            options=[
+                "anime style, highly detailed digital painting, vibrant color scheme, 16:9 aspect ratio",
+                "minimalist vector illustration, silhouette art style, dark indigo and gold color palette, graphic novel layout",
+                "cyberpunk neon aesthetic, futuristic manga illustration, dark shadows, heavy ink contours",
+                "watercolor manga sketch, soft pastel colors, hand-drawn paper texture, highly expressive lines"
+            ]
         )
 
         image_backend_choice = st.selectbox(
@@ -460,7 +376,6 @@ with tab_recap:
                 "Local GPU - Anything V5 (anime SD1.5)",
                 "Local GPU - CounterfeitXL (anime SDXL)",
                 "Gemini API - Imagen 3",
-                "OpenAI API - DALL-E 3",
                 "Local GPU - Custom Hugging Face model",
             ],
             key="recap_image_backend_choice"
@@ -469,10 +384,6 @@ with tab_recap:
             recap_image_backend = "gemini"
             recap_image_model_id = "imagen-4.0-generate-001"
             st.caption("Uses your Gemini API key for cloud image generation. Good fallback when local SDXL images are weak.")
-        elif image_backend_choice == "OpenAI API - DALL-E 3":
-            recap_image_backend = "openai"
-            recap_image_model_id = "dall-e-3"
-            st.caption("Uses your OpenAI key. Great for realistic and varied styles without local GPU.")
         elif image_backend_choice == "Local GPU - Anything V5 (anime SD1.5)":
             recap_image_backend = "local"
             recap_image_model_id = "stablediffusionapi/anything-v5"
@@ -521,21 +432,36 @@ with tab_recap:
                 
                 # Setup audio path
                 if is_demo or audio_file is None:
-                    # No audio uploaded — auto-generate TTS from script
-                    _tts_out = os.path.join(TEMP_DIR, "auto_voiceover.mp3")
-                    _tts_backend = tts_backend if not is_demo else "gtts"
-                    _tts_label = {"gtts": "gTTS", "openai": "OpenAI TTS", "bark": "Bark"}.get(_tts_backend, _tts_backend)
-                    st.info(f"🔊 **Auto-generating voiceover with {_tts_label}...**")
+                    # No audio uploaded — auto-generate TTS
+                    audio_path = os.path.join(TEMP_DIR, "auto_voiceover.mp3")
                     try:
+                        from core.tts_manager import generate_tts
+                        _backend_label = {"gtts": "gTTS", "openai": "OpenAI TTS", "bark": "Bark"}.get(tts_backend, tts_backend)
+                        st.info(f"**Auto-generating voiceover with {_backend_label}...**")
+
+                        _bark_progress = st.empty()
+                        _bark_bar = st.empty()
+
+                        def _bark_cb(current, total, chunk_text):
+                            if total == 0:
+                                return
+                            if current < total:
+                                _bark_progress.caption(f"🔊 Bark chunk {current + 1}/{total}: *{chunk_text[:80]}...*")
+                                _bark_bar.progress(current / total)
+                            else:
+                                _bark_progress.empty()
+                                _bark_bar.empty()
+
                         audio_path = generate_tts(
-                            script_text, _tts_out,
-                            backend=_tts_backend,
+                            script_text, audio_path,
+                            backend=tts_backend,
                             voice=tts_voice,
                             openai_key=openai_key,
+                            progress_callback=_bark_cb if tts_backend == "bark" else None,
                         )
-                        st.success(f"✅ Voiceover generated ({_tts_label}).")
+                        st.success(f"✅ Voiceover generated ({_backend_label}).")
                     except Exception as e:
-                        st.error(f"Error generating voiceover with {_tts_label}: {e}")
+                        st.error(f"Error generating audio: {e}")
                         st.stop()
                 else:
                     # Use uploaded audio file
@@ -556,7 +482,7 @@ with tab_recap:
                             scenes = refine_scene_pacing(scenes)
                             st.info("Bypassed Gemini script parser (using pre-defined Kagurabachi scene prompts).")
                         else:
-                            scenes = parse_script_to_prompts(script_text, active_key, content_type=recap_content_type)
+                            scenes = parse_script_to_prompts(script_text, active_key)
                         st.success(f"Found {len(scenes)} scenes/beats.")
                     except Exception as e:
                         st.error(f"Error parsing script: {e}")
@@ -592,8 +518,6 @@ with tab_recap:
                             prompt = scene['image_prompt']
                             st.write(f"🖌️ *Generating Scene #{idx+1} prompt:* `{prompt[:90]}...`")
                             
-                            # Resolve correct API key for the chosen image backend
-                            _img_api_key = openai_key if recap_image_backend == "openai" else active_key
                             # Call local generator
                             img = generate_scene_image(
                                 prompt,
@@ -601,7 +525,7 @@ with tab_recap:
                                 mock_mode=draft_mode,
                                 image_backend=recap_image_backend,
                                 model_id=recap_image_model_id,
-                                api_key=_img_api_key,
+                                api_key=active_key,
                             )
                             img.save(image_path)
                             
