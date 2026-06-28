@@ -71,17 +71,73 @@ def refine_scene_pacing(scenes, max_words=38):
 
     return refined_scenes
 
-def parse_script_to_prompts(script_text, api_key):
+_DIRECTOR_PROFILES = {
+    "🍌 Manga / Anime Recap": (
+        "You are an expert anime storyboard director. Analyze the script, split it into logical narrative beats, "
+        "and write detailed image prompts for each beat. Each image_prompt must describe an anime-style 16:9 illustration "
+        "with expressive character acting, dramatic lighting, and vibrant colors matching the narration."
+    ),
+    "📚 Educational / Explainer": (
+        "You are an educational explainer video director. Split the script into clear informational beats and write "
+        "image prompts that visualize each concept with clean, professional illustrations or metaphors. "
+        "Each image_prompt must describe a bright, clear 16:9 image with a strong focal subject that instantly "
+        "communicates the concept being explained."
+    ),
+    "😱 Horror / Thriller": (
+        "You are a horror film cinematographer. Split the script into atmospheric beats and write image prompts "
+        "that create dread, tension, and unease. Each image_prompt must describe a dark, cinematic 16:9 scene "
+        "with deep shadows, desaturated colors, ominous atmosphere, and unsettling composition."
+    ),
+    "🏛️ Documentary / History": (
+        "You are a documentary film director. Split the script into narrative beats and write image prompts "
+        "that feel authentic and grounded. Each image_prompt must describe a cinematic 16:9 scene with "
+        "natural lighting, realistic environments, and a photojournalistic or historical painting aesthetic."
+    ),
+    "🎤 Podcast / Story": (
+        "You are a cinematic story visualizer. Split the script into story beats and write image prompts "
+        "that bring the narrative to life. Each image_prompt must describe an evocative 16:9 scene with "
+        "warm intimate lighting, character-focused composition, and a film still or graphic novel aesthetic."
+    ),
+    "💼 Tech / Business": (
+        "You are a modern tech and business video director. Split the script into conceptual beats and write "
+        "image prompts that visualize each idea with clean, professional imagery. "
+        "Each image_prompt must describe a sleek 16:9 image with professional studio lighting "
+        "and technology-focused or corporate visual metaphors."
+    ),
+    "🌟 Motivation / Self-Help": (
+        "You are a motivational content director. Split the script into inspiring beats and write image prompts "
+        "that evoke emotion, determination, and hope. Each image_prompt must describe an uplifting 16:9 scene "
+        "with golden lighting, expansive compositions, and warm inspiring colors."
+    ),
+    "🎵 Cinematic / Music Video": (
+        "You are a music video director. Split the script into visual beats and write image prompts "
+        "that are bold, dynamic, and cinematic. Each image_prompt must describe a striking 16:9 scene "
+        "with dramatic lighting, strong visual contrast, and moody color grading."
+    ),
+}
+
+_FALLBACK_STYLE = {
+    "🍌 Manga / Anime Recap": "anime style, highly detailed, expressive character acting, dramatic lighting, 16:9 aspect ratio",
+    "📚 Educational / Explainer": "clean educational illustration, bright professional lighting, clear focal subject, 16:9 aspect ratio",
+    "😱 Horror / Thriller": "dark atmospheric horror, deep shadows, desaturated color palette, ominous mood, 16:9 aspect ratio",
+    "🏛️ Documentary / History": "cinematic documentary, natural light, authentic environment, realistic detail, 16:9 aspect ratio",
+    "🎤 Podcast / Story": "cinematic storytelling, warm intimate lighting, character-focused composition, 16:9 aspect ratio",
+    "💼 Tech / Business": "sleek modern tech illustration, clean lines, professional studio lighting, 16:9 aspect ratio",
+    "🌟 Motivation / Self-Help": "inspirational cinematic landscape, golden hour lighting, uplifting mood, 16:9 aspect ratio",
+    "🎵 Cinematic / Music Video": "cinematic film still, dramatic lighting, moody color grade, 16:9 aspect ratio",
+}
+
+
+def parse_script_to_prompts(script_text, api_key, content_type="🍌 Manga / Anime Recap"):
     """
     Splits the script into logical scene beats and writes descriptive text-to-image prompts.
     Returns a list of dicts: [{'text_segment': str, 'image_prompt': str}]
     """
     from core.gemini_manager import run_with_rotation
     
+    _profile = _DIRECTOR_PROFILES.get(content_type, _DIRECTOR_PROFILES["🍌 Manga / Anime Recap"])
     system_instruction = (
-        "You are an expert anime storyboard director. Your task is to analyze a video script, "
-        "split it into a sequence of logical narrative beats (scenes), and write detailed image generation prompts "
-        "for each beat.\n"
+        f"{_profile}\n\n"
         "Ensure the output is a valid JSON array. Each element in the array must be an object with exactly "
         "two fields:\n"
         "- 'text_segment': The subset of script text spoken during this beat.\n"
@@ -89,9 +145,9 @@ def parse_script_to_prompts(script_text, api_key):
         "representing the exact narration in text_segment, while using the previous and next beats only for continuity. "
         "The prompt must identify the main subject, action, setting, emotion, camera framing, lighting, and color palette "
         "from the spoken context so the image feels tightly matched to the voiceover. Preserve recurring characters and locations "
-        "with consistent generic descriptions across beats. Use descriptors like 'anime style', 'dramatic lighting', 'high detail', "
-        "and mention composition and coloring. Avoid vague recap posters, title cards, symbolic filler, or unrelated generic action. "
-        "Avoid using trademarked character names; use generic physical descriptions "
+        "with consistent generic descriptions across beats. "
+        "Avoid vague recap posters, title cards, symbolic filler, or unrelated generic action. "
+        "Avoid using trademarked character names or brand names; use generic physical descriptions "
         "(e.g., 'a boy with spiky black hair and a scar on his face, wearing a dark coat').\n"
         "Do not include any markdown format tags like ```json or other text in your response, output raw JSON only."
     )
@@ -131,8 +187,9 @@ def parse_script_to_prompts(script_text, api_key):
         fallback_scenes = []
         for p in paragraphs:
             for beat in split_text_into_beats(p):
+                _fb_style = _FALLBACK_STYLE.get(content_type, _FALLBACK_STYLE["🍌 Manga / Anime Recap"])
                 fallback_scenes.append({
                     "text_segment": beat,
-                    "image_prompt": f"Anime style 16:9 illustration matching this narration: {beat[:180]}..., main subject and action clearly visible, expressive emotion, cinematic composition, dramatic lighting, detailed digital art"
+                    "image_prompt": f"{_fb_style}, main subject and action clearly visible, expressive emotion, cinematic composition: {beat[:180]}"
                 })
         return fallback_scenes

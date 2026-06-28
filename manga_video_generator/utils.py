@@ -54,7 +54,38 @@ def render_panel_remix(tab, TEMP_DIR, OUTPUT_DIR, gemini_key, openai_key):
                 placeholder="Paste the recap narration here, or upload voiceover audio above.",
                 key="panel_remix_narration"
             )
-    
+
+            # Auto-TTS controls — only shown when no voiceover is uploaded
+            if panel_voiceover is None:
+                from core.tts_manager import OPENAI_VOICES, BARK_PRESETS
+                _panel_tts_backend = st.selectbox(
+                    "🔊 Auto-generate voiceover engine (from narration text above)",
+                    options=["gtts", "openai", "bark"],
+                    format_func=lambda x: {
+                        "gtts": "gTTS (free, basic quality)",
+                        "openai": "OpenAI TTS (tts-1-hd, high quality)",
+                        "bark": "Bark (local GPU, very expressive — slow)",
+                    }[x],
+                    key="panel_remix_tts_backend",
+                )
+                if _panel_tts_backend == "openai":
+                    _panel_tts_voice = st.selectbox(
+                        "Voice", OPENAI_VOICES, index=0, key="panel_remix_tts_voice_openai",
+                        help="onyx/echo are deep narrative voices.",
+                    )
+                    st.caption("Uses your OpenAI key. Works with any language text.")
+                elif _panel_tts_backend == "bark":
+                    _panel_tts_voice = st.selectbox(
+                        "Speaker preset", BARK_PRESETS, index=0, key="panel_remix_tts_voice_bark",
+                        help="Runs locally on GPU. ~30-60s per sentence. Very expressive.",
+                    )
+                    st.caption("⚠️ Requires: `pip install git+https://github.com/suno-ai/bark.git scipy`")
+                else:
+                    _panel_tts_voice = None
+            else:
+                _panel_tts_backend = "gtts"
+                _panel_tts_voice = None
+
             st.markdown("---")
             st.subheader("🧠 Panel Analysis")
             panel_analyzer_backend_choice = st.selectbox(
@@ -309,6 +340,21 @@ def render_panel_remix(tab, TEMP_DIR, OUTPUT_DIR, gemini_key, openai_key):
                         panel_audio_path = os.path.join(TEMP_DIR, f"panel_remix_{panel_voiceover.name}")
                         with open(panel_audio_path, "wb") as f:
                             f.write(panel_voiceover.getbuffer())
+                    elif panel_narration_text.strip():
+                        from core.tts_manager import generate_tts
+                        _tts_out = os.path.join(TEMP_DIR, "panel_remix_tts.mp3")
+                        _tts_label = {"gtts": "gTTS", "openai": "OpenAI TTS", "bark": "Bark"}.get(_panel_tts_backend, _panel_tts_backend)
+                        try:
+                            with st.spinner(f"🔊 Generating voiceover with {_tts_label}..."):
+                                panel_audio_path = generate_tts(
+                                    panel_narration_text, _tts_out,
+                                    backend=_panel_tts_backend,
+                                    voice=_panel_tts_voice,
+                                    openai_key=openai_key,
+                                )
+                            st.success(f"✅ Voiceover generated ({_tts_label}).")
+                        except Exception as _tts_err:
+                            st.warning(f"⚠️ TTS failed: {_tts_err}. Will assemble without audio.")
     
                     try:
                         st.write("🧠 **Step 1:** Analyzing panels and building rich original prompts...")
