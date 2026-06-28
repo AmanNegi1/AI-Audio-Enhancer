@@ -33,7 +33,6 @@ from PIL import Image
 from core.parser import parse_script_to_prompts, refine_scene_pacing
 from core.aligner import align_audio_segments
 from core.generator import generate_scene_image
-from core.tts_manager import generate_tts, OPENAI_VOICES, BARK_PRESETS
 from core.custom_generator import generate_custom_image
 from core.assembler import assemble_video
 from core.audio_first_recaper import create_audio_first_scenes
@@ -266,17 +265,7 @@ with st.sidebar:
 # ---------------- Main Dashboard ----------------
 st.title("🚀 AI Creative Studio & Recap Engine")
 
-tab_recap, tab_audio_first, tab_panel_remix, tab_txt2img, tab_chat, tab_txt2vid, tab_img2vid, tab_lora = st.tabs([
-    "🎬 Script to Video",
-    "🎧 Audio-First YouTube Studio",
-    "🧩 Panel Remix Studio",
-    "🎨 Text to Image",
-    "💬 AI Conversation",
-    "🎥 Text to Video",
-    "🖼️ Image to Video",
-    "🧬 LoRA Training Studio",
-])
-
+# ── Content Type Presets for Script to Video ──────────────────────────────────
 _CONTENT_STYLE_PRESETS = {
     "🍌 Manga / Anime Recap": [
         "anime style, highly detailed digital painting, vibrant color scheme, 16:9 aspect ratio",
@@ -328,6 +317,17 @@ _CONTENT_STYLE_PRESETS = {
     ],
 }
 
+tab_recap, tab_audio_first, tab_panel_remix, tab_txt2img, tab_chat, tab_txt2vid, tab_img2vid, tab_lora = st.tabs([
+    "🎬 Script to Video",
+    "🎧 Audio-First YouTube Studio",
+    "🧩 Panel Remix Studio",
+    "🎨 Text to Image",
+    "💬 AI Conversation",
+    "🎥 Text to Video",
+    "🖼️ Image to Video",
+    "🧬 LoRA Training Studio",
+])
+
 with tab_recap:
     st.write("Convert any script — manga recap, education, horror, podcast — into a fully voiced AI video.")
     
@@ -336,6 +336,15 @@ with tab_recap:
     with col_input:
         st.markdown("<div class='status-card'>", unsafe_allow_html=True)
         st.subheader("📝 Inputs")
+        
+        # Content type selector (drives dynamic style presets)
+        recap_content_type = st.selectbox(
+            "📂 Content type",
+            options=list(_CONTENT_STYLE_PRESETS.keys()),
+            index=0,
+            key="recap_content_type",
+            help="Selects AI director persona and style presets optimized for your content."
+        )
         
         # 0. Gemini API Key
         gemini_key_main = st.text_input(
@@ -374,60 +383,58 @@ with tab_recap:
                 type=["mp3", "wav", "m4a", "mpeg"]
             )
         
-        # TTS controls (visible only when no audio is uploaded)
+        # TTS Backend selector (shown only when no audio is uploaded)
         if not st.session_state.get("use_demo_audio", False) and audio_file is None:
-            tts_backend = st.selectbox(
-                "Auto-generate voiceover engine",
+            from core.tts_manager import OPENAI_VOICES, BARK_PRESETS
+            
+            _tts_backend = st.selectbox(
+                "🔊 Voice generation engine",
                 options=["gtts", "openai", "bark"],
                 format_func=lambda x: {
-                    "gtts": "gTTS (free, basic quality)",
-                    "openai": "OpenAI TTS (tts-1-hd, high quality)",
-                    "bark": "Bark (local GPU, very expressive — slow)",
+                    "gtts": "gTTS (free, basic quality, fast)",
+                    "openai": "OpenAI TTS (high quality, multilingual)",
+                    "bark": "Bark (local GPU, very expressive, slower)",
                 }[x],
-                index=0,
-                key="recap_tts_backend",
+                help="gTTS: free but robotic. OpenAI: requires API key, any language. Bark: ~30-60s per sentence, most expressive."
             )
-            if tts_backend == "openai":
+            
+            if _tts_backend == "openai":
                 tts_voice = st.selectbox(
-                    "Voice", OPENAI_VOICES, index=0, key="recap_tts_voice_openai",
-                    help="onyx/echo are deep narrative voices. nova/shimmer are lighter.",
+                    "OpenAI voice preset",
+                    options=OPENAI_VOICES,
+                    index=0,
+                    format_func=lambda x: {"onyx": "🎙️ onyx (deep, narrator)", "echo": "📢 echo (dramatic)", 
+                                           "alloy": "👤 alloy (neutral)", "fable": "📖 fable (warm)", 
+                                           "nova": "⭐ nova (upbeat)", "shimmer": "✨ shimmer (high)"}[x]
                 )
-                st.caption("Uses your OpenAI key. Works with any language text.")
-            elif tts_backend == "bark":
+            elif _tts_backend == "bark":
                 tts_voice = st.selectbox(
-                    "Speaker preset", BARK_PRESETS, index=0, key="recap_tts_voice_bark",
-                    help="Runs locally on GPU. ~30-60s per sentence. Very expressive.",
+                    "Bark speaker preset",
+                    options=BARK_PRESETS,
+                    index=0,
                 )
-                st.caption("⚠️ Requires: `pip install git+https://github.com/suno-ai/bark.git scipy`")
-            else:
-                tts_voice = None
+                st.caption("⚠️ Bark is slow (~30-60s per sentence). Scripts > 50 words will process chunk-by-chunk.")
+            else:  # gtts
+                tts_voice = "gtts_en"  # placeholder
         else:
-            tts_backend = "gtts"
-            tts_voice = None
+            _tts_backend = "gtts"
+            tts_voice = "gtts_en"  # default
         
-        # 2. Content type
-        recap_content_type = st.selectbox(
-            "Content type",
-            options=list(_CONTENT_STYLE_PRESETS.keys()),
-            index=0,
-            key="recap_content_type",
-            help="Controls the AI director persona and visual style direction for every generated scene.",
-        )
-
-        # 3. Script Input
+        # 2. Script Input
         script_text = st.text_area(
-            "Paste your script",
+            "Paste Script (use double-line breaks to outline new paragraphs/scene ideas)",
             value=st.session_state["script_text"],
             height=250,
-            placeholder="Paste any script — manga recap, educational explainer, horror story, podcast transcript..."
+            placeholder="Paragraph 1 description...\n\nParagraph 2 description..."
         )
         st.session_state["script_text"] = script_text
-
-        # 4. Style Presets (dynamic per content type)
+        
+        # 3. Style Presets (dynamic based on content type)
         style_preset = st.selectbox(
             "Select Art Style preset",
             options=_CONTENT_STYLE_PRESETS[recap_content_type],
-            key="recap_style_preset",
+            index=0,
+            key="recap_style_preset"
         )
 
         image_backend_choice = st.selectbox(
@@ -437,7 +444,6 @@ with tab_recap:
                 "Local GPU - Anything V5 (anime SD1.5)",
                 "Local GPU - CounterfeitXL (anime SDXL)",
                 "Gemini API - Imagen 3",
-                "OpenAI API - DALL-E 3",
                 "Local GPU - Custom Hugging Face model",
             ],
             key="recap_image_backend_choice"
@@ -446,10 +452,6 @@ with tab_recap:
             recap_image_backend = "gemini"
             recap_image_model_id = "imagen-4.0-generate-001"
             st.caption("Uses your Gemini API key for cloud image generation. Good fallback when local SDXL images are weak.")
-        elif image_backend_choice == "OpenAI API - DALL-E 3":
-            recap_image_backend = "openai"
-            recap_image_model_id = "dall-e-3"
-            st.caption("Uses your OpenAI key. Great for realistic and varied styles without local GPU.")
         elif image_backend_choice == "Local GPU - Anything V5 (anime SD1.5)":
             recap_image_backend = "local"
             recap_image_model_id = "stablediffusionapi/anything-v5"
@@ -498,21 +500,42 @@ with tab_recap:
                 
                 # Setup audio path
                 if is_demo or audio_file is None:
-                    # No audio uploaded — auto-generate TTS from script
-                    _tts_out = os.path.join(TEMP_DIR, "auto_voiceover.mp3")
-                    _tts_backend = tts_backend if not is_demo else "gtts"
-                    _tts_label = {"gtts": "gTTS", "openai": "OpenAI TTS", "bark": "Bark"}.get(_tts_backend, _tts_backend)
-                    st.info(f"🔊 **Auto-generating voiceover with {_tts_label}...**")
+                    # No audio uploaded — auto-generate TTS
+                    audio_path = os.path.join(TEMP_DIR, "auto_voiceover.mp3")
                     try:
-                        audio_path = generate_tts(
-                            script_text, _tts_out,
+                        from core.tts_manager import generate_tts
+                        
+                        # Validate script length
+                        word_count = len(script_text.split())
+                        if word_count == 0:
+                            st.error("Script is empty. Please paste a script.")
+                            st.stop()
+                        elif word_count > 500:
+                            st.warning(f"⚠️ Script is {word_count} words. Bark will be very slow. Consider splitting into shorter clips.")
+                        
+                        tts_label = {"gtts": "gTTS", "openai": "OpenAI TTS", "bark": "Bark"}[_tts_backend]
+                        st.info(f"🔊 **Generating voiceover with {tts_label}** ({word_count} words)...")
+                        
+                        # Generate with appropriate backend
+                        actual_path = generate_tts(
+                            script_text,
+                            audio_path,
                             backend=_tts_backend,
-                            voice=tts_voice,
-                            openai_key=openai_key,
+                            voice=tts_voice if _tts_backend != "gtts" else None,
+                            openai_key=active_key if _tts_backend == "openai" else None,
+                            use_streaming=word_count > 50  # Bark streaming for long texts
                         )
-                        st.success(f"✅ Voiceover generated ({_tts_label}).")
+                        
+                        # Check if audio was actually generated
+                        if not os.path.exists(actual_path) or os.path.getsize(actual_path) < 1000:
+                            raise RuntimeError(f"Generated audio file is empty or missing: {actual_path}")
+                        
+                        audio_path = actual_path  # Use actual path (may be .wav for Bark)
+                        st.success(f"✅ Voiceover generated ({tts_label}, {word_count} words).")
                     except Exception as e:
-                        st.error(f"Error generating voiceover with {_tts_label}: {e}")
+                        st.error(f"TTS generation failed: {e}")
+                        import traceback
+                        st.error(traceback.format_exc())
                         st.stop()
                 else:
                     # Use uploaded audio file
@@ -569,8 +592,6 @@ with tab_recap:
                             prompt = scene['image_prompt']
                             st.write(f"🖌️ *Generating Scene #{idx+1} prompt:* `{prompt[:90]}...`")
                             
-                            # Resolve correct API key for the chosen image backend
-                            _img_api_key = openai_key if recap_image_backend == "openai" else active_key
                             # Call local generator
                             img = generate_scene_image(
                                 prompt,
@@ -578,7 +599,7 @@ with tab_recap:
                                 mock_mode=draft_mode,
                                 image_backend=recap_image_backend,
                                 model_id=recap_image_model_id,
-                                api_key=_img_api_key,
+                                api_key=active_key,
                             )
                             img.save(image_path)
                             
