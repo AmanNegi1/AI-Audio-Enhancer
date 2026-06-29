@@ -97,19 +97,24 @@ def get_text_to_video_pipeline(model_id: str):
             pipe = PipelineClass.from_pretrained(model_id, **load_kwargs)
 
         if device == "cuda":
-            # 14B+ models need sequential offload (slower but allows any model size on 8 GB VRAM)
-            if _is_large_model(model_id):
-                pipe.enable_sequential_cpu_offload()
-            else:
+            # Enable sequential CPU offload for maximum VRAM savings on 8GB GPUs
+            if hasattr(pipe, "enable_sequential_cpu_offload"):
+                try:
+                    pipe.enable_sequential_cpu_offload()
+                except Exception:
+                    pipe.enable_model_cpu_offload()
+            elif hasattr(pipe, "enable_model_cpu_offload"):
                 pipe.enable_model_cpu_offload()
             if hasattr(pipe, "enable_attention_slicing"):
                 pipe.enable_attention_slicing()
         else:
             pipe = pipe.to("cpu")
 
-        # VAE memory optimisations — handle both pipeline-level (Mochi) and vae-level (CogVideoX, LTX, Wan)
+        # VAE memory optimisations — handle both pipeline-level and vae-level
         if hasattr(pipe, "enable_vae_tiling"):
             pipe.enable_vae_tiling()
+        if hasattr(pipe, "enable_vae_slicing"):
+            pipe.enable_vae_slicing()
         if hasattr(pipe, "vae"):
             if hasattr(pipe.vae, "enable_tiling"):
                 pipe.vae.enable_tiling()
@@ -158,9 +163,12 @@ def generate_text_to_video(
         kwargs["width"] = width
         kwargs["height"] = height
 
-    output = pipe(**kwargs)
+    clear_vram()
+    with torch.inference_mode():
+        output = pipe(**kwargs)
     frames = output.frames[0]
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     export_to_video(frames, output_path, fps=fps)
+    clear_vram()
     return output_path

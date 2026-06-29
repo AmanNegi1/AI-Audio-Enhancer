@@ -102,6 +102,15 @@ def check_and_download_model(model_id: str, variant: str = None, ignore_patterns
         kwargs["tqdm_class"] = StreamlitHubProgress
         st.info(f"🔍 Checking cache / downloading `{model_id}`...")
         
-    # Run the download (or cache check)
-    path = snapshot_download(**kwargs)
+    # Run the download (or cache check) with automatic healing for broken cache pointers
+    try:
+        path = snapshot_download(**kwargs)
+    except Exception as exc:
+        if "No such file or directory" in str(exc) or "blobs" in str(exc) or "Errno 2" in str(exc):
+            if is_in_streamlit():
+                st.warning(f"⚠️ Detected incomplete cache pointer from previous interrupted run. Healing cache for `{model_id}`...")
+            kwargs["force_download"] = True
+            path = snapshot_download(**kwargs)
+        else:
+            raise exc
     return path
