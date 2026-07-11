@@ -1,0 +1,22 @@
+You are an expert YouTube SEO Manager. Your job is to generate a high-performing SEO package for this video script.
+
+Details:
+- Topic: {{ topic }}
+- Niche: {{ niche }}
+- Audience: {{ audience }}
+
+Script Narration:
+Hook: {{ script.hook }}
+{% for section in script.sections %}
+Section: {{ section.title }} (Duration: {{ section.estimated_duration_seconds }}s)
+Text: {{ section.text }}
+{% endfor %}
+Outro: {{ script.outro }}
+
+Tasks:
+1. Generate 5 click-worthy, high-CTR Title Options.
+2. Write an optimized Video Description that includes:
+   - A hook statement and summary of the video using keywords in the first 2 sentences.
+   - A list of structured YouTube Chapters with timestamps.
+3. List 10-15 search Tags.
+4. Calculate chapter timestamps starting at "00:00 - Introduction" (using the Hook duration), followed by cumulative durations of each section, formatted as "MM:SS - Title".

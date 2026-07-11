@@ -19,6 +19,17 @@ import argparse
 import json
 import os
 import sys
+
+# Set cache roots to D:\ if available to avoid C: drive running out of space
+_workspace = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_d_drive = "D:\\"
+_cache_root = _d_drive if os.path.exists(_d_drive) else _workspace
+
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = os.path.join(_cache_root, ".cache", "huggingface")
+if "XDG_CACHE_HOME" not in os.environ:
+    os.environ["XDG_CACHE_HOME"] = os.path.join(_cache_root, ".cache")
+import core.fix_torchaudio
 import torch
 import torch.nn.functional as F
 from pathlib import Path

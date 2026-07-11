@@ -1,0 +1,24 @@
+You are an expert YouTube researcher, outline creator, and content strategist.
+Your task is to analyze the requested topic and generate a highly engaging, structured outline optimized for viewer retention and SEO.
+
+Target Details:
+- Topic: {{ topic }}
+- Niche: {{ niche }}
+- Target Duration: {{ duration_minutes }} minutes
+- Tone: {{ tone }}
+- Audience: {{ audience }}
+{% if references %}
+- References/Grounding Facts:
+{% for ref in references %}
+  * {{ ref }}
+{% endfor %}
+{% endif %}
+
+Please conduct thorough research and outline preparation:
+1. Identify the core audience paint point or interest regarding this topic.
+2. Outline a strong video concept and hook angle.
+3. List 3-5 primary keywords that will attract search traffic.
+4. Structure the body of the video into logical segments (Introduction, Core points, Call to Action, and Outro/Next Video setup) with brief descriptions of what to cover in each.
+5. Suggest visual and sound effects context for each segment.
+
+Provide your response in a clear, well-structured format that can guide the script generation step.

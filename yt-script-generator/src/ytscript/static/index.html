@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI YouTube Script Generator - Enterprise Dashboard</title>
+    <!-- Google Fonts: Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i data-lucide="video" class="accent-glow"></i>
+                </div>
+                <h2>YT Script AI</h2>
+                <span class="badge badge-primary">Enterprise</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="generator">
+                    <i data-lucide="sparkles"></i> Generator
+                </button>
+                <button class="nav-item" data-tab="series" id="nav-series-btn">
+                    <i data-lucide="layers"></i> Series Studio
+                </button>
+                <button class="nav-item" data-tab="planner" id="nav-planner-btn">
+                    <i data-lucide="calendar"></i> Channel Planner
+                </button>
+                <button class="nav-item" data-tab="history" id="nav-history-btn">
+                    <i data-lucide="history"></i> Library
+                </button>
+                <button class="nav-item" data-tab="settings">
+                    <i data-lucide="settings"></i> API Settings
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <p>v0.1.0 • v1 Pipeline</p>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-title">
+                    <h1 id="page-title">Script Generator</h1>
+                    <p id="page-subtitle">Configure and run the multi-stage script generation pipeline</p>
+                </div>
+                <div class="status-summary" id="key-count-summary">
+                    <span class="status-item"><i data-lucide="key" class="text-emerald"></i> Gemini Keys: <strong id="gemini-key-count">0</strong></span>
+                    <span class="status-item"><i data-lucide="key" class="text-violet"></i> OpenAI Keys: <strong id="openai-key-count">0</strong></span>
+                </div>
+            </header>
+
+            <!-- TAB: GENERATOR -->
+            <div class="tab-content active" id="tab-generator">
+                <div class="dashboard-grid">
+                    <!-- Left: Form Card -->
+                    <div class="glass-card panel-form">
+                        <div class="card-header">
+                            <i data-lucide="sliders"></i>
+                            <h3>Configuration</h3>
+                        </div>
+                        
+                        <form id="generator-form" class="generator-form">
+                            <div class="form-group">
+                                <label for="topic">Video Topic / Outline Summary</label>
+                                <textarea id="topic" name="topic" placeholder="e.g., 5 Secrets of High-Retention YouTube Videos" required></textarea>
+                                <div class="topic-suggestions">
+                                    <span class="help-text">💡 Recommended Hooks for Niche:</span>
+                                    <div class="suggestions-list" id="suggestions-list">
+                                        <!-- Suggestions chips will be dynamically populated by app.js -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="niche">Niche</label>
+                                    <select id="niche" name="niche">
+                                        <option value="tech">Tech</option>
+                                        <option value="finance">Finance</option>
+                                        <option value="health">Health & Wellness</option>
+                                        <option value="true_crime">True Crime</option>
+                                        <option value="history">History</option>
+                                        <option value="comedy">Comedy</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="tone">Tone</label>
+                                    <select id="tone" name="tone">
+                                        <option value="educational" selected>Educational</option>
+                                        <option value="energetic">Energetic</option>
+                                        <option value="dramatic">Dramatic</option>
+                                        <option value="casual">Casual</option>
+                                        <option value="humorous">Humorous</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="duration">Duration (mins)</label>
+                                    <input type="number" id="duration" name="duration" min="1" max="30" step="0.5" value="5.0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="audience">Target Audience</label>
+                                    <input type="text" id="audience" name="audience" value="General public, creators">
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="provider">LLM Provider</label>
+                                    <select id="provider" name="provider">
+                                        <option value="gemini" selected>Google Gemini</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="mock">Offline Mock (Local)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="model">Model (Optional)</label>
+                                    <input type="text" id="model" name="model" placeholder="Default model will be used">
+                                </div>
+                            </div>
+
+                            <div class="form-group collapse-trigger" onclick="toggleAdvancedOptions()">
+                                <span>Advanced Grounding & Voice Style</span>
+                                <i data-lucide="chevron-down" id="advanced-chevron"></i>
+                            </div>
+
+                            <div class="advanced-section hidden" id="advanced-section">
+                                <div class="form-group">
+                                    <label for="voice_sample">Creator Voice Sample (Text)</label>
+                                    <textarea id="voice_sample" name="voice_sample" placeholder="Paste a transcript of your past video scripts to match style/word choices..."></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="references">Reference Material / Fact Sheets</label>
+                                    <textarea id="references" name="references" placeholder="Enter facts or URLs (one per line) to ground LLM outputs..."></textarea>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-block" id="submit-btn">
+                                <i data-lucide="zap"></i> Generate Script & Report
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Right: Pipeline Tracker & Outputs -->
+                    <div class="right-column">
+                        <!-- Stepper Progress Tracker -->
+                        <div class="glass-card panel-progress hidden" id="progress-card">
+                            <div class="card-header">
+                                <i data-lucide="refresh-cw" class="spin"></i>
+                                <h3>Processing Pipeline</h3>
+                            </div>
+                            
+                            <div class="stepper">
+                                <div class="step" id="step-1">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 1: Outline & Research</h4>
+                                        <p>Mapping keywords and creating visual outline structure...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="step-2">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 2: Script Expansion</h4>
+                                        <p>Generating spoken narration, visual overlays, and audio cues...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="step-3">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 3: Monetization Check</h4>
+                                        <p>Scanning text for advertiser safety and profanity rules...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="step-4">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 4: Originality & Copyright Guard</h4>
+                                        <p>Enforcing original transformative voice and royalty-free check...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="step-5">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 5: Retention Optimizer</h4>
+                                        <p>Scoring hook strength and planning visual pattern interrupts...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="step-6">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Stage 6: SEO Packages & Chapters</h4>
+                                        <p>Generating clicks-worthy titles, descriptions, and chapters...</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="live-console">
+                                <div class="console-header">Console Logs</div>
+                                <div class="console-body" id="console-logs">Awaiting process execution...</div>
+                            </div>
+                        </div>
+
+                        <!-- Initial Placeholder -->
+                        <div class="glass-card panel-placeholder" id="placeholder-card">
+                            <i data-lucide="video" class="massive-icon text-muted"></i>
+                            <h3>Awaiting Script Request</h3>
+                            <p>Fill out the configuration parameters on the left to start generating your monetization-safe YouTube script.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preview Area (Split Screen) -->
+                <div class="results-preview-section hidden" id="results-preview-section">
+                    <div class="preview-header">
+                        <h2 id="generated-topic-title">Script: How to code in 2026</h2>
+                        <div class="header-actions">
+                            <button class="btn btn-secondary" onclick="exportToClipboard('script')"><i data-lucide="copy"></i> Copy Script</button>
+                            <button class="btn btn-secondary" onclick="exportToClipboard('report')"><i data-lucide="copy"></i> Copy Report</button>
+                        </div>
+                    </div>
+                    
+                    <div class="preview-grid">
+                        <!-- Script Narration & Cues -->
+                        <div class="glass-card preview-panel markdown-body" id="script-preview-panel">
+                            <!-- Injected by JS -->
+                        </div>
+
+                        <!-- SEO & Compliance Reports -->
+                        <div class="glass-card preview-panel" id="report-preview-panel">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: SERIES STUDIO -->
+            <div class="tab-content" id="tab-series">
+                <div class="dashboard-grid">
+                    <!-- Left: Series Config Card -->
+                    <div class="glass-card panel-form">
+                        <div class="card-header">
+                            <i data-lucide="layers"></i>
+                            <h3>Series Configuration</h3>
+                        </div>
+                        
+                        <form id="series-form" class="generator-form">
+                            <div class="form-group">
+                                <label for="series-title">Series Title</label>
+                                <input type="text" id="series-title" name="title" placeholder="e.g., Python Programming for Absolute Beginners" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="series_arc">Overall Series Narrative / Learning Arc</label>
+                                <textarea id="series_arc" name="series_arc" placeholder="e.g., A 3-part video series teaching python syntax, loops, and building a mini-game. Each episode must cliffhang into the next." required style="min-height:100px;"></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Or select a recommended Series template:</label>
+                                <div class="suggestions-list" id="series-suggestions-list">
+                                    <!-- Dynamically populated by JS -->
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="series-niche">Niche</label>
+                                    <select id="series-niche" name="niche">
+                                        <option value="tech" selected>Tech</option>
+                                        <option value="finance">Finance</option>
+                                        <option value="health">Health & Wellness</option>
+                                        <option value="true_crime">True Crime</option>
+                                        <option value="history">History</option>
+                                        <option value="comedy">Comedy</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="series-tone">Tone</label>
+                                    <select id="series-tone" name="tone">
+                                        <option value="educational" selected>Educational</option>
+                                        <option value="energetic">Energetic</option>
+                                        <option value="dramatic">Dramatic</option>
+                                        <option value="casual">Casual</option>
+                                        <option value="humorous">Humorous</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="num_episodes">Number of Episodes</label>
+                                    <select id="num_episodes" name="num_episodes">
+                                        <option value="3" selected>3 Episodes</option>
+                                        <option value="4">4 Episodes</option>
+                                        <option value="5">5 Episodes</option>
+                                        <option value="6">6 Episodes</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="series-provider">LLM Provider</label>
+                                    <select id="series-provider" name="provider">
+                                        <option value="gemini" selected>Google Gemini</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="mock">Offline Mock (Local)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="series-model">Model (Optional)</label>
+                                <input type="text" id="series-model" name="model" placeholder="Default model will be used">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-block" id="series-submit-btn">
+                                <i data-lucide="zap"></i> Generate Series Bible & Scripts
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Right: Series Progress Tracker -->
+                    <div class="right-column">
+                        <!-- Progress Card -->
+                        <div class="glass-card panel-progress hidden" id="series-progress-card">
+                            <div class="card-header">
+                                <i data-lucide="refresh-cw" class="spin"></i>
+                                <h3>Series Writing Progress</h3>
+                            </div>
+                            
+                            <div class="stepper" id="series-stepper">
+                                <!-- Dynamically populated by JS based on number of episodes -->
+                            </div>
+
+                            <div class="live-console">
+                                <div class="console-header">Series Console Logs</div>
+                                <div class="console-body" id="series-console-logs">Awaiting process execution...</div>
+                            </div>
+                        </div>
+
+                        <!-- Initial Placeholder -->
+                        <div class="glass-card panel-placeholder" id="series-placeholder-card">
+                            <i data-lucide="layers" class="massive-icon text-muted"></i>
+                            <h3>Awaiting Series Request</h3>
+                            <p>Fill out the configuration parameters on the left to start generating your multi-episode video bible and scripts.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preview Area (Series Selector Grid) -->
+                <div class="results-preview-section hidden" id="series-preview-section">
+                    <div class="preview-header" style="flex-direction:column; align-items:flex-start; gap:1rem;">
+                        <div>
+                            <h2 id="series-preview-title">Series: Learn Python</h2>
+                            <p id="series-preview-arc" class="help-text" style="font-size:0.9rem; margin-top:0.25rem;">Overall Arc description</p>
+                        </div>
+                        
+                        <!-- Episode Selector Chips -->
+                        <div class="episode-selector-chips" id="episode-selector-chips">
+                            <!-- e.g. <button class="chip active">Series Bible</button> -->
+                        </div>
+                    </div>
+                    
+                    <div class="preview-grid" id="series-preview-grid">
+                        <!-- Left Panel: Script Preview -->
+                        <div class="glass-card preview-panel markdown-body" id="series-script-preview">
+                            <!-- Injected by JS -->
+                        </div>
+
+                        <!-- Right Panel: Report/Bible Detail Preview -->
+                        <div class="glass-card preview-panel" id="series-report-preview">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: CHANNEL PLANNER -->
+            <div class="tab-content" id="tab-planner">
+                <div class="dashboard-grid">
+                    <!-- Left: Planner Input Card -->
+                    <div class="glass-card panel-form">
+                        <div class="card-header">
+                            <i data-lucide="calendar"></i>
+                            <h3>Channel & Audit Planner</h3>
+                        </div>
+                        
+                        <form id="planner-form" class="generator-form">
+                            <!-- Workflow Step 1: Channel Setup -->
+                            <div id="planner-workflow-step-1">
+                                <div class="form-group">
+                                    <label for="planner-channel-url">My YouTube Channel Link (Optional)</label>
+                                    <input type="url" id="planner-channel-url" name="channel_url" placeholder="e.g., https://youtube.com/@AmanTech">
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="planner-niche">My Niche</label>
+                                        <select id="planner-niche" name="niche">
+                                            <option value="tech" selected>Tech</option>
+                                            <option value="finance">Finance</option>
+                                            <option value="health">Health & Wellness</option>
+                                            <option value="true_crime">True Crime</option>
+                                            <option value="history">History</option>
+                                            <option value="comedy">Comedy</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="planner-days">Plan Duration</label>
+                                        <select id="planner-days" name="plan_days">
+                                            <option value="30" selected>30 Days Growth Calendar</option>
+                                            <option value="60">60 Days Growth Calendar</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="planner-provider">LLM Provider</label>
+                                        <select id="planner-provider" name="provider">
+                                            <option value="gemini" selected>Google Gemini</option>
+                                            <option value="openai">OpenAI</option>
+                                            <option value="mock">Offline Mock (Local)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="planner-model">Model (Optional)</label>
+                                        <input type="text" id="planner-model" name="model" placeholder="Default model will be used">
+                                    </div>
+                                </div>
+
+                                <button type="button" class="btn btn-primary btn-block" id="planner-btn-next">
+                                    Next: Discover Viral Competitors <i data-lucide="arrow-right" style="margin-left:0.25rem;"></i>
+                                </button>
+                            </div>
+
+                            <!-- Workflow Step 2: Select Competitor Videos (Hidden by default) -->
+                            <div id="planner-workflow-step-2" class="hidden">
+                                <h4 style="color:white; font-size:0.95rem; margin-bottom:0.75rem;">Discovering trending competitor videos for your niche...</h4>
+                                
+                                <div class="form-group">
+                                    <label>Auto-Discovered Videos to Transcribe & Audit</label>
+                                    <div id="planner-recommendations-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:0.5rem; max-height:220px; overflow-y:auto; padding-right:0.25rem;">
+                                        <!-- Checkbox items loaded by JS -->
+                                        <div style="color:var(--text-muted); font-size:0.9rem; text-align:center; padding:1.5rem 0;">
+                                            <i class="spin" data-lucide="refresh-cw" style="display:block; margin:0 auto 0.5rem;"></i> Querying YouTube...
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                                    <button type="button" class="btn btn-secondary" id="planner-btn-back" style="flex:1;">
+                                        <i data-lucide="arrow-left" style="margin-right:0.25rem;"></i> Back
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" id="planner-submit-btn" style="flex:2;">
+                                        <i data-lucide="compass" style="margin-right:0.25rem;"></i> Audit & Plan
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Right: Planner Progress Tracker -->
+                    <div class="right-column">
+                        <!-- Progress Card -->
+                        <div class="glass-card panel-progress hidden" id="planner-progress-card">
+                            <div class="card-header">
+                                <i data-lucide="refresh-cw" class="spin"></i>
+                                <h3>Plan Generation Progress</h3>
+                            </div>
+                            
+                            <div class="stepper">
+                                <div class="step" id="planner-step-1">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Channel Scan</h4>
+                                        <p>Extracting profile analytics and content patterns...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="planner-step-2">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Transcription Audit</h4>
+                                        <p>Downloading and transcribing competitor trending videos...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="planner-step-3">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Gap Analysis</h4>
+                                        <p>Detecting unmet viewer needs and saturated topics...</p>
+                                    </div>
+                                </div>
+                                <div class="step" id="planner-step-4">
+                                    <div class="step-num"><i data-lucide="circle"></i></div>
+                                    <div class="step-desc">
+                                        <h4>Growth Schedule</h4>
+                                        <p>Mapping out click-worthy titles, angles, and formats...</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="live-console">
+                                <div class="console-header">Planner Console Logs</div>
+                                <div class="console-body" id="planner-console-logs">Awaiting execution...</div>
+                            </div>
+                        </div>
+
+                        <!-- Initial Placeholder -->
+                        <div class="glass-card panel-placeholder" id="planner-placeholder-card">
+                            <i data-lucide="calendar" class="massive-icon text-muted"></i>
+                            <h3>Channel Planner</h3>
+                            <p>Enter your channel profile and competitor video links on the left to discover niche gaps and schedule a 30-day content calendar.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Planner Result View -->
+                <div class="results-preview-section hidden" id="planner-result-section" style="margin-top:2rem;">
+                    <div class="preview-header" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:1rem; margin-bottom:1.5rem;">
+                        <div>
+                            <h2 id="planner-result-title">Growth Plan for @channel</h2>
+                            <p id="planner-result-meta" class="help-text" style="font-size:0.9rem; margin-top:0.25rem;">Niche: tech | Duration: 30 days</p>
+                        </div>
+                    </div>
+
+                    <!-- Gaps & Opportunities Cards -->
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:1.5rem; margin-bottom:2rem;">
+                        <div class="glass-card" style="padding:1.5rem;">
+                            <h4 style="color:#f43f5e; font-size:1.1rem; margin-bottom:0.75rem;"><i data-lucide="alert-triangle" style="width:16px; height:16px; margin-right:0.25rem; display:inline-block; vertical-align:middle;"></i> Identified Niche Gaps</h4>
+                            <ul id="planner-gaps-list" style="margin-left:1.25rem; color:var(--text-secondary); line-height:1.6; display:flex; flex-direction:column; gap:0.5rem;">
+                                <!-- Injected by JS -->
+                            </ul>
+                        </div>
+
+                        <div class="glass-card" style="padding:1.5rem;">
+                            <h4 style="color:#10b981; font-size:1.1rem; margin-bottom:0.75rem;"><i data-lucide="trending-up" style="width:16px; height:16px; margin-right:0.25rem; display:inline-block; vertical-align:middle;"></i> Growth Opportunities</h4>
+                            <ul id="planner-opportunities-list" style="margin-left:1.25rem; color:var(--text-secondary); line-height:1.6; display:flex; flex-direction:column; gap:0.5rem;">
+                                <!-- Injected by JS -->
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Competitor Video Audit Card -->
+                    <div class="glass-card" style="padding:1.5rem; margin-bottom:2rem;" id="planner-audits-card">
+                        <h4 style="color:#c084fc; font-size:1.1rem; margin-bottom:1rem;"><i data-lucide="tv" style="width:16px; height:16px; margin-right:0.25rem; display:inline-block; vertical-align:middle;"></i> Competitor Video Audits & Transcription Reports</h4>
+                        <div id="planner-audits-container" style="display:flex; flex-direction:column; gap:1.25rem;">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+
+                    <!-- 30-Day/60-Day Content Calendar Grid -->
+                    <div class="glass-card" style="padding:1.5rem;">
+                        <h3 style="color:white; margin-bottom:1rem;"><i data-lucide="calendar" style="width:18px; height:18px; margin-right:0.25rem; display:inline-block; vertical-align:middle;"></i> Actionable Content Calendar Schedule</h3>
+                        <div id="planner-calendar-container" style="display:flex; flex-direction:column; gap:1rem;">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: HISTORY -->
+            <div class="tab-content" id="tab-history">
+                <div class="glass-card panel-history">
+                    <div class="card-header">
+                        <i data-lucide="folder-open"></i>
+                        <h3>Generated Files Library</h3>
+                    </div>
+                    
+                    <div class="history-table-container">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Video Topic</th>
+                                    <th>Niche</th>
+                                    <th>Generated On</th>
+                                    <th>Status</th>
+                                    <th class="actions-header">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-list">
+                                <!-- Injected by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: SETTINGS -->
+            <div class="tab-content" id="tab-settings">
+                <div class="glass-card panel-settings">
+                    <div class="card-header">
+                        <i data-lucide="key"></i>
+                        <h3>API Key Pools Management</h3>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i data-lucide="info"></i>
+                        <p>Provide multiple API keys separating them by commas. If a rate limit or quota exceeded error occurs, the system will automatically rotate to the next key in the pool and retry.</p>
+                    </div>
+
+                    <form id="settings-form" class="settings-form">
+                        <div class="form-group">
+                            <label for="gemini_keys">Google Gemini API Keys (Comma-separated pool)</label>
+                            <textarea id="gemini_keys" name="gemini_keys" rows="4" placeholder="AQ.Ab8RN..."></textarea>
+                            <span class="help-text">Currently configured: <strong id="settings-gemini-key-count">0</strong> keys</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="openai_keys">OpenAI API Keys (Comma-separated pool)</label>
+                            <textarea id="openai_keys" name="openai_keys" rows="4" placeholder="sk-proj-..."></textarea>
+                            <span class="help-text">Currently configured: <strong id="settings-openai-key-count">0</strong> keys</span>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="save-keys-btn">
+                            <i data-lucide="save"></i> Save Key Configuration
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        // Init Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>

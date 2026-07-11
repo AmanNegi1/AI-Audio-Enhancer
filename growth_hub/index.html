@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zenith: Self-Improvement & Portfolio Hub</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- KaTeX for beautiful math formulas -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  <!-- Local CSS styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <i class="fa-solid fa-compass-drafting logo-icon"></i>
+          <span>ZENITH</span>
+        </div>
+      </div>
+      
+      <!-- User Profile Widget in Sidebar -->
+      <div class="user-profile-card">
+        <div class="avatar">
+          <i class="fa-solid fa-user-astronaut"></i>
+        </div>
+        <div class="user-details">
+          <span class="user-name">Growth Novice</span>
+          <span class="user-level" id="user-level-label">Level 1</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="user-xp-bar" style="width: 0%;"></div>
+        </div>
+        <div class="xp-text" id="user-xp-text">0 / 100 XP</div>
+      </div>
+      
+      <!-- Nav Links -->
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-tab="speaking">
+          <i class="fa-solid fa-microphone-lines"></i>
+          <span>Speaking Gym</span>
+        </button>
+        <button class="nav-item" data-tab="math">
+          <i class="fa-solid fa-calculator"></i>
+          <span>Math Playground</span>
+        </button>
+        <button class="nav-item" data-tab="cp">
+          <i class="fa-solid fa-code"></i>
+          <span>CP Arena</span>
+        </button>
+        <button class="nav-item" data-tab="system-design">
+          <i class="fa-solid fa-cubes"></i>
+          <span>System Design Vault</span>
+        </button>
+      </nav>
+      
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <div class="streak-widget">
+          <i class="fa-solid fa-fire streak-icon animate-pulse"></i>
+          <span class="streak-count" id="streak-days">0</span> Day Streak
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- DASHBOARD TAB -->
+      <section id="dashboard" class="tab-content active">
+        <header class="content-header">
+          <h1>Dashboard</h1>
+          <p class="subtitle">Focus on consistency. Build habits. Master concepts.</p>
+        </header>
+        
+        <div class="dashboard-grid">
+          <!-- Welcome Banner / Quote -->
+          <div class="dashboard-card welcome-banner">
+            <div class="welcome-text">
+              <h2>Welcome back, Engineer!</h2>
+              <p id="motivational-quote">"The only way to learn mathematics is to do mathematics." — Paul Halmos</p>
+              <button class="btn btn-primary" onclick="window.appState.getNewQuote()"><i class="fa-solid fa-rotate"></i> New Inspiration</button>
+            </div>
+            <div class="welcome-visual">
+              <i class="fa-solid fa-rocket float-animation"></i>
+            </div>
+          </div>
+
+          <!-- Growth Metrics Card -->
+          <div class="dashboard-card metrics-card">
+            <h3>Growth Metrics</h3>
+            <div class="skills-progress-list">
+              <div class="skill-progress-item">
+                <div class="skill-info">
+                  <span>English Confidence</span>
+                  <span id="stat-english-progress">0%</span>
+                </div>
+                <div class="progress-bar-container"><div class="progress-bar english-color" id="bar-english-progress" style="width: 0%;"></div></div>
+              </div>
+              <div class="skill-progress-item">
+                <div class="skill-info">
+                  <span>Mathematics (Calculus, LA, Prob)</span>
+                  <span id="stat-math-progress">0%</span>
+                </div>
+                <div class="progress-bar-container"><div class="progress-bar math-color" id="bar-math-progress" style="width: 0%;"></div></div>
+              </div>
+              <div class="skill-progress-item">
+                <div class="skill-info">
+                  <span>Competitive Programming</span>
+                  <span id="stat-cp-progress">0%</span>
+                </div>
+                <div class="progress-bar-container"><div class="progress-bar cp-color" id="bar-cp-progress" style="width: 0%;"></div></div>
+              </div>
+              <div class="skill-progress-item">
+                <div class="skill-info">
+                  <span>System Design & Principles</span>
+                  <span id="stat-design-progress">0%</span>
+                </div>
+                <div class="progress-bar-container"><div class="progress-bar design-color" id="bar-design-progress" style="width: 0%;"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Daily Goals Tracker -->
+          <div class="dashboard-card goals-card">
+            <h3>Today's Target Checklist</h3>
+            <div class="goals-input-group">
+              <input type="text" id="new-goal-input" placeholder="Add a custom daily goal..." />
+              <button class="btn btn-icon" id="add-goal-btn"><i class="fa-solid fa-plus"></i></button>
+            </div>
+            <ul class="goals-list" id="goals-list-container">
+              <!-- Dynamically populated -->
+            </ul>
+          </div>
+          
+          <!-- Beginner Guideline / Motivation Panel -->
+          <div class="dashboard-card advice-card">
+            <h3>Why Math & System Design?</h3>
+            <div class="advice-content">
+              <p>Great minds like <strong>Elon Musk</strong> repeatedly stress learning the foundational math that governs the universe and computing. Math isn't just about equations; it trains your brain in structured problem-solving and abstraction.</p>
+              <ul>
+                <li><i class="fa-solid fa-circle-nodes"></i> <strong>In AI</strong>: Linear Algebra forms the weights and activations of neural networks; Calculus performs optimization; Probability models uncertainty.</li>
+                <li><i class="fa-solid fa-network-wired"></i> <strong>In Software</strong>: System Design principles prevent structural decay when scaling software from 10 users to 10 million.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SPEAKING GYM TAB -->
+      <section id="speaking" class="tab-content">
+        <header class="content-header">
+          <h1>Technical Speaking Gym</h1>
+          <p class="subtitle">Articulate complex ideas clearly, structure your answers, and sound confident.</p>
+        </header>
+
+        <div class="speaking-layout">
+          <!-- Setup Panel -->
+          <div class="speaking-panel setup-panel">
+            <div class="card-section">
+              <h3>1. Choose Framework</h3>
+              <div class="framework-selectors">
+                <div class="framework-card active" data-framework="star">
+                  <h4>STAR Method</h4>
+                  <p>Situation, Task, Action, Result. Perfect for behavioral questions and project walk-throughs.</p>
+                </div>
+                <div class="framework-card" data-framework="ceb">
+                  <h4>Concept-Example-Benefit (CEB)</h4>
+                  <p>Define concept, give a concrete example, explain the software benefit. Best for technical topics.</p>
+                </div>
+                <div class="framework-card" data-framework="eli5">
+                  <h4>ELI5 Method</h4>
+                  <p>Explain Like I'm 5. Translate complex technical jargon into a simple everyday analogy. Great for non-tech folks.</p>
+                </div>
+                <div class="framework-card" data-framework="prep">
+                  <h4>PREP Method</h4>
+                  <p>Point, Reason, Example, Point. State your core point, explain the reason, illustrate, and reiterate. Perfect for structured answers.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-section">
+              <h3>2. Select Practice Category & Prompt</h3>
+              <div class="category-tabs">
+                <button class="category-btn active" data-cat="architecture">Architecture</button>
+                <button class="category-btn" data-cat="coding">Coding/Algos</button>
+                <button class="category-btn" data-cat="design">Design Patterns</button>
+                <button class="category-btn" data-cat="explain">Explain to others</button>
+                <button class="category-btn" data-cat="behavioral">Behavioral</button>
+              </div>
+              <div class="prompt-list" id="speaking-prompts-container">
+                <!-- Dynamically loaded -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Practice Workspace -->
+          <div class="speaking-panel practice-panel">
+            <div class="active-prompt-display">
+              <span class="badge" id="active-prompt-category">SYSTEM ARCHITECTURE</span>
+              <h2 id="active-prompt-text">Explain how a CDN (Content Delivery Network) speeds up asset loading.</h2>
+              <div class="framework-hint-box" id="framework-hint">
+                <strong>Framework Guide (STAR):</strong>
+                <ul>
+                  <li><strong>Situation</strong>: Set the scene (e.g. users far from server face high latency).</li>
+                  <li><strong>Task</strong>: What you need to solve (reducing latency for global asset delivery).</li>
+                  <li><strong>Action</strong>: Cache assets on Edge servers geographically closer to users.</li>
+                  <li><strong>Result</strong>: Assets load instantly, reducing server load and improving UX.</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- Speaking Timer Workspace -->
+            <div class="practice-controls-card">
+              <div class="speaking-guidelines">
+                <h4>Suggested Keywords (Check off as you speak):</h4>
+                <div class="keyword-pool" id="keyword-pool-container">
+                  <!-- Dynamically loaded -->
+                </div>
+              </div>
+
+              <div class="timer-section">
+                <div class="timer-display" id="speaking-timer">00:00</div>
+                <div class="timer-buttons">
+                  <button class="btn btn-success" id="timer-start-btn"><i class="fa-solid fa-play"></i> Start Practice</button>
+                  <button class="btn btn-warning hidden" id="timer-pause-btn"><i class="fa-solid fa-pause"></i> Pause</button>
+                  <button class="btn btn-danger" id="timer-reset-btn" disabled><i class="fa-solid fa-stop"></i> Finish</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Self-Scoring Card (Shown on Finish) -->
+            <div class="self-score-card hidden" id="evaluation-card">
+              <h3>Practice Complete! Rate Yourself</h3>
+              <p>Be honest with yourself to track your true confidence growth.</p>
+              
+              <div class="score-sliders">
+                <div class="score-row">
+                  <span>Clarity & Tone:</span>
+                  <div class="stars" data-metric="clarity">
+                    <i class="fa-regular fa-star" data-value="1"></i>
+                    <i class="fa-regular fa-star" data-value="2"></i>
+                    <i class="fa-regular fa-star" data-value="3"></i>
+                    <i class="fa-regular fa-star" data-value="4"></i>
+                    <i class="fa-regular fa-star" data-value="5"></i>
+                  </div>
+                </div>
+                <div class="score-row">
+                  <span>Structure (Used Framework?):</span>
+                  <div class="stars" data-metric="structure">
+                    <i class="fa-regular fa-star" data-value="1"></i>
+                    <i class="fa-regular fa-star" data-value="2"></i>
+                    <i class="fa-regular fa-star" data-value="3"></i>
+                    <i class="fa-regular fa-star" data-value="4"></i>
+                    <i class="fa-regular fa-star" data-value="5"></i>
+                  </div>
+                </div>
+                <div class="score-row">
+                  <span>Pacing (Neither too fast nor slow):</span>
+                  <div class="stars" data-metric="pacing">
+                    <i class="fa-regular fa-star" data-value="1"></i>
+                    <i class="fa-regular fa-star" data-value="2"></i>
+                    <i class="fa-regular fa-star" data-value="3"></i>
+                    <i class="fa-regular fa-star" data-value="4"></i>
+                    <i class="fa-regular fa-star" data-value="5"></i>
+                  </div>
+                </div>
+                <div class="score-row">
+                  <span>Confidence (Minimal filler words):</span>
+                  <div class="stars" data-metric="confidence">
+                    <i class="fa-regular fa-star" data-value="1"></i>
+                    <i class="fa-regular fa-star" data-value="2"></i>
+                    <i class="fa-regular fa-star" data-value="3"></i>
+                    <i class="fa-regular fa-star" data-value="4"></i>
+                    <i class="fa-regular fa-star" data-value="5"></i>
+                  </div>
+                </div>
+              </div>
+              
+              <button class="btn btn-primary btn-block" id="submit-score-btn" disabled>Log Session & Earn XP</button>
+            </div>
+            
+            <!-- Articulation Deck -->
+            <div class="articulation-deck">
+              <h3>Articulation Helper (Try using these transitions)</h3>
+              <div class="cards-carousel">
+                <div class="helper-card">
+                  <strong>Transitioning:</strong>
+                  <p>"Consequently..." / "Building on top of this..."</p>
+                </div>
+                <div class="helper-card">
+                  <strong>Explaining Architecture:</strong>
+                  <p>"Under the hood, this decouples X from Y..."</p>
+                </div>
+                <div class="helper-card">
+                  <strong>Highlighting Value:</strong>
+                  <p>"Crucially, this optimization guarantees that..."</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MATH PLAYGROUND TAB -->
+      <section id="math" class="tab-content">
+        <header class="content-header">
+          <h1>Mathematics Playground</h1>
+          <p class="subtitle">Interactively visualize mathematical foundations and discover how they relate to AI.</p>
+        </header>
+
+        <!-- Nested Tabs for Math -->
+        <div class="math-tabs">
+          <button class="math-tab-btn active" data-subtab="calculus">Calculus</button>
+          <button class="math-tab-btn" data-subtab="linear-algebra">Linear Algebra</button>
+          <button class="math-tab-btn" data-subtab="probability">Probability</button>
+          <button class="math-tab-btn" data-subtab="math-ai">Math & AI</button>
+        </div>
+
+        <!-- CALCULUS SUBTAB -->
+        <div id="calculus" class="math-subcontent active">
+          <div class="math-grid">
+            <div class="math-viz-panel">
+              <h3>Riemann Sum Area Integrals</h3>
+              <p>Integration calculates the area under a curve. We approximate it by splitting the domain into $n$ rectangles. As $n \to \infty$, the approximation converges to the exact integral.</p>
+              
+              <div class="canvas-container">
+                <canvas id="riemann-canvas" width="600" height="350"></canvas>
+              </div>
+
+              <div class="control-box">
+                <div class="slider-row">
+                  <label for="riemann-n-slider">Number of Rectangles ($n$): <strong id="riemann-n-val">6</strong></label>
+                  <input type="range" id="riemann-n-slider" min="2" max="100" value="6" />
+                </div>
+                <div class="math-results">
+                  <div class="result-metric">Riemann Approximation: <span id="riemann-approx">0.00</span></div>
+                  <div class="result-metric">Exact Analytical Area: <span id="riemann-exact">0.00</span></div>
+                  <div class="result-metric">Approximation Error: <span id="riemann-error">0.00%</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="math-theory-panel">
+              <h3>Calculus Fundamentals</h3>
+              
+              <div class="theory-block">
+                <h4>1. Limits & Continuity</h4>
+                <p>A limit describes what value a function approaches as its input gets closer to a target:
+                $$\lim_{x \to c} f(x) = L$$
+                For a function to be <strong>continuous</strong> at $c$, the limit must exist and equal the actual function value: $\lim_{x \to c} f(x) = f(c)$.</p>
+              </div>
+
+              <div class="theory-block">
+                <h4>2. Differentiability</h4>
+                <p>A derivative measures the instantaneous rate of change (the slope of the tangent line):
+                $$f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$$
+                If the slope changes abruptly (like in the absolute value function $|x|$ at $x=0$), the function is not differentiable there.</p>
+              </div>
+
+              <div class="theory-block">
+                <h4>3. Maxima & Minima</h4>
+                <p>To optimize (find the best/worst state), we look for <strong>critical points</strong> where the derivative $f'(x) = 0$.
+                - **First Derivative Test**: If $f'(x)$ changes sign, it is a local extrema.
+                - **Second Derivative Test**: If $f''(x) > 0$ at a critical point, it is a minimum (concave up). If $f''(x) < 0$, it is a maximum (concave down).</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LINEAR ALGEBRA SUBTAB -->
+        <div id="linear-algebra" class="math-subcontent">
+          <div class="math-grid">
+            <div class="math-viz-panel">
+              <h3>Eigenvector Alignment Space</h3>
+              <p>An eigenvector of a transformation matrix $A$ is a non-zero vector $\vec{v}$ that does not change direction when scaled by $A$. That is: $A\vec{v} = \lambda\vec{v}$, where $\lambda$ is the eigenvalue.</p>
+              
+              <div class="canvas-container">
+                <canvas id="eigen-canvas" width="600" height="350"></canvas>
+              </div>
+
+              <div class="control-box">
+                <div class="slider-row">
+                  <label for="eigen-angle-slider">Drift Vector $\vec{v}$ Angle: <strong id="eigen-angle-val">0°</strong></label>
+                  <input type="range" id="eigen-angle-slider" min="0" max="360" value="45" />
+                </div>
+                <div class="eigen-status" id="eigen-status-box">
+                  Rotate the vector to align with the eigenvectors of matrix $A = \begin{pmatrix} 2 & 1 \\ 1 & 2 \end{pmatrix}$.
+                </div>
+              </div>
+            </div>
+
+            <div class="math-theory-panel">
+              <h3>Matrix Operations & LU Decomposition</h3>
+              
+              <!-- Matrix Calculator -->
+              <div class="matrix-calculator-card">
+                <h4>Interactive Matrix $2 \times 2$</h4>
+                <p>Input values to compute the determinant and step-by-step LU decomposition.</p>
+                <div class="matrix-input-grid">
+                  <span>$A = \begin{pmatrix}$</span>
+                  <input type="number" id="m-00" value="4" />
+                  <input type="number" id="m-01" value="3" />
+                  <span>$\\$</span>
+                  <input type="number" id="m-10" value="6" />
+                  <input type="number" id="m-11" value="3" />
+                  <span>$\end{pmatrix}$</span>
+                </div>
+                <button class="btn btn-primary btn-block" onclick="window.appState.calculateMatrix()">Solve Matrix</button>
+                
+                <div class="matrix-results-box" id="matrix-results">
+                  <!-- Output populated dynamically -->
+                </div>
+              </div>
+
+              <div class="theory-block">
+                <h4>LU Decomposition Explained</h4>
+                <p>LU decomposition factors a matrix $A$ into a Lower triangular matrix $L$ and an Upper triangular matrix $U$:
+                $$A = LU$$
+                This is heavily used in computing to solve linear systems $A\vec{x} = \vec{b}$ efficiently via forward and back substitution, rather than computing $A^{-1}$ which is computationally expensive.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROBABILITY SUBTAB -->
+        <div id="probability" class="math-subcontent">
+          <div class="math-grid">
+            <div class="math-viz-panel">
+              <h3>Probability Distribution Plotter</h3>
+              <p>Visualize standard distributions and see how mean, median, mode, and standard deviation shift.</p>
+              
+              <div class="dist-selector">
+                <button class="dist-btn active" data-dist="normal">Normal</button>
+                <button class="dist-btn" data-dist="uniform">Uniform</button>
+                <button class="dist-btn" data-dist="exponential">Exponential</button>
+                <button class="dist-btn" data-dist="poisson">Poisson</button>
+                <button class="dist-btn" data-dist="binomial">Binomial</button>
+              </div>
+
+              <div class="canvas-container">
+                <canvas id="prob-canvas" width="600" height="300"></canvas>
+              </div>
+
+              <div class="control-box" id="dist-sliders-container">
+                <!-- Sliders dynamically populated depending on selected distribution -->
+              </div>
+            </div>
+
+            <!-- Bayes Theorem Card -->
+            <div class="math-theory-panel">
+              <h3>Bayes' Theorem & Inference</h3>
+              
+              <div class="bayes-card">
+                <h4>Bayes' Theorem Calculator</h4>
+                <p>$$P(A|B) = \frac{P(B|A) P(A)}{P(B)}$$</p>
+                <p>Let $A$ = Has Disease, $B$ = Tests Positive. Compute probability you actually have the disease given a positive test.</p>
+                
+                <div class="slider-row">
+                  <label for="bayes-prior">Prior Probability $P(A)$ (Disease Rate): <strong id="bayes-prior-val">1%</strong></label>
+                  <input type="range" id="bayes-prior" min="0.1" max="10" step="0.1" value="1" />
+                </div>
+                <div class="slider-row">
+                  <label for="bayes-sens">Sensitivity $P(B|A)$ (True Positive Rate): <strong id="bayes-sens-val">90%</strong></label>
+                  <input type="range" id="bayes-sens" min="50" max="99" value="90" />
+                </div>
+                <div class="slider-row">
+                  <label for="bayes-fpr">False Positive Rate $P(B|A^c)$: <strong id="bayes-fpr-val">5%</strong></label>
+                  <input type="range" id="bayes-fpr" min="1" max="20" value="5" />
+                </div>
+
+                <div class="bayes-results-box" id="bayes-results">
+                  <!-- Dynamically Calculated -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MATH IN AI SUBTAB -->
+        <div id="math-ai" class="math-subcontent">
+          <div class="math-ai-container">
+            <h2>The Real Existence of Math in AI</h2>
+            <p class="intro">Artificial Intelligence is not magic; it is the concrete application of Calculus, Linear Algebra, and Probability. Here is exactly how they compose the neural systems powering modern models:</p>
+            
+            <div class="ai-cards-grid">
+              <div class="ai-card">
+                <div class="ai-card-header">
+                  <i class="fa-solid fa-shapes ai-card-icon"></i>
+                  <h3>Linear Algebra (Representations)</h3>
+                </div>
+                <p><strong>What it is:</strong> Tensors, vectors, and matrices.</p>
+                <p><strong>In AI:</strong> Every input (image pixels, tokenized words) is represented as a high-dimensional vector. Neural network layer weights are matrices. The core feedforward operation of a network is simply matrix multiplication followed by an activation function:
+                $$\vec{h} = \sigma(W\vec{x} + \vec{b})$$
+                GPUs are specifically designed to perform billions of these matrix operations concurrently.</p>
+              </div>
+
+              <div class="ai-card">
+                <div class="ai-card-header">
+                  <i class="fa-solid fa-chart-line-up ai-card-icon"></i>
+                  <h3>Calculus (Learning)</h3>
+                </div>
+                <p><strong>What it is:</strong> Derivatives, partial derivatives, and the Chain Rule.</p>
+                <p><strong>In AI:</strong> How does an AI "learn"? It tries to minimize a Loss (error) function using <strong>Gradient Descent</strong>. The gradient is a vector of partial derivatives pointing in the direction of steepest increase. By calculating derivatives, we know how to adjust weights to reduce errors:
+                $$W \leftarrow W - \eta \frac{\partial L}{\partial W}$$
+                The **Chain Rule** allows us to propagate this derivative backwards from the output layer to the input layer (Backpropagation).</p>
+              </div>
+
+              <div class="ai-card">
+                <div class="ai-card-header">
+                  <i class="fa-solid fa-dice-d20 ai-card-icon"></i>
+                  <h3>Probability (Uncertainty)</h3>
+                </div>
+                <p><strong>What it is:</strong> Distributions, entropy, and likelihood.</p>
+                <p><strong>In AI:</strong> A LLM doesn't "know" a fact; it assigns a probability distribution over the next word in a vocabulary. Loss functions (like Cross-Entropy) measure the difference between the predicted probability distribution and the true distribution. Generative models (like GANs or Diffusion models) learn to sample from high-dimensional probability distributions representing realistic data (like natural images).</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CP ARENA TAB -->
+      <section id="cp" class="tab-content">
+        <header class="content-header">
+          <h1>Competitive Programming Arena</h1>
+          <p class="subtitle">Develop analytical problem solving. Test your Javascript code in real-time.</p>
+        </header>
+
+        <div class="cp-layout">
+          <!-- Problem Selection -->
+          <div class="cp-panel list-panel">
+            <h3>Beginner Problem Checklist</h3>
+            <div class="problem-list" id="cp-problem-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Code Workspace -->
+          <div class="cp-panel workspace-panel">
+            <div class="problem-details-card" id="cp-details-card">
+              <h2 id="cp-prob-title">Select a problem to start</h2>
+              <div id="cp-prob-desc">Choose a problem from the left sidebar to load its description, constraints, and workspace.</div>
+            </div>
+
+            <div class="code-editor-card">
+              <div class="editor-header">
+                <span>Code Editor (Javascript)</span>
+                <button class="btn btn-secondary btn-sm" onclick="window.appState.resetCode()"><i class="fa-solid fa-arrow-rotate-left"></i> Reset Starter</button>
+              </div>
+              <div class="editor-wrapper">
+                <textarea id="code-textarea" spellcheck="false" placeholder="// Write code here..."></textarea>
+              </div>
+              <div class="editor-footer">
+                <button class="btn btn-secondary" id="cp-run-btn"><i class="fa-solid fa-play"></i> Run Tests</button>
+                <button class="btn btn-success" id="cp-submit-btn" disabled><i class="fa-solid fa-check"></i> Submit Solution</button>
+              </div>
+            </div>
+
+            <!-- Terminal Output -->
+            <div class="terminal-card">
+              <div class="terminal-header">
+                <span>Test Cases Terminal</span>
+              </div>
+              <div class="terminal-body" id="cp-terminal">
+                Console output will appear here after running tests.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SYSTEM DESIGN VAULT TAB -->
+      <section id="system-design" class="tab-content">
+        <header class="content-header">
+          <h1>System Design Vault</h1>
+          <p class="subtitle">Master the architectural blueprints and design principles that govern large-scale software.</p>
+        </header>
+
+        <div class="design-tabs">
+          <button class="design-tab-btn active" data-subtab="solid">SOLID Principles</button>
+          <button class="design-tab-btn" data-subtab="patterns">Design Patterns</button>
+          <button class="design-tab-btn" data-subtab="infra-simulator">Interactive Infrastructure Flow</button>
+        </div>
+
+        <!-- SOLID PRINCIPLES -->
+        <div id="solid" class="design-subcontent active">
+          <div class="solid-grid">
+            <div class="solid-nav">
+              <button class="solid-nav-btn active" data-principle="s">S: Single Responsibility</button>
+              <button class="solid-nav-btn" data-principle="o">O: Open/Closed</button>
+              <button class="solid-nav-btn" data-principle="l">L: Liskov Substitution</button>
+              <button class="solid-nav-btn" data-principle="i">I: Interface Segregation</button>
+              <button class="solid-nav-btn" data-principle="d">D: Dependency Inversion</button>
+            </div>
+            
+            <div class="solid-content-box" id="solid-details">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- DESIGN PATTERNS -->
+        <div id="patterns" class="design-subcontent">
+          <div class="patterns-grid">
+            <div class="patterns-list-panel">
+              <div class="pattern-item active" data-pattern="singleton">
+                <h4>Singleton</h4>
+                <p>Creational Pattern</p>
+              </div>
+              <div class="pattern-item" data-pattern="factory">
+                <h4>Factory Method</h4>
+                <p>Creational Pattern</p>
+              </div>
+              <div class="pattern-item" data-pattern="observer">
+                <h4>Observer</h4>
+                <p>Behavioral Pattern</p>
+              </div>
+              <div class="pattern-item" data-pattern="strategy">
+                <h4>Strategy</h4>
+                <p>Behavioral Pattern</p>
+              </div>
+            </div>
+            
+            <div class="pattern-details-panel" id="pattern-details">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- INFRASTRUCTURE SIMULATOR -->
+        <div id="infra-simulator" class="design-subcontent">
+          <div class="infra-layout">
+            <div class="infra-simulator-panel">
+              <h3>Scale & Caching Simulator</h3>
+              <p>Simulate read and write request flows. Toggle caching to see how it speeds up reads and lightens database loads. Simulate a node failure to see load balancer redistribution.</p>
+              
+              <div class="canvas-container">
+                <canvas id="infra-canvas" width="700" height="400"></canvas>
+              </div>
+
+              <div class="infra-controls">
+                <button class="btn btn-primary" id="btn-read-req"><i class="fa-solid fa-arrow-right-to-bracket"></i> Send Read Request</button>
+                <button class="btn btn-warning" id="btn-write-req"><i class="fa-solid fa-pen-nib"></i> Send Write Request</button>
+                <button class="btn btn-secondary" id="btn-toggle-cache">Toggle Redis Cache: <strong id="cache-status">ENABLED</strong></button>
+                <button class="btn btn-danger" id="btn-kill-server">Toggle Web Server B: <strong id="server-status">ONLINE</strong></button>
+              </div>
+            </div>
+
+            <div class="infra-explanation-panel">
+              <h3>Infrastructure Components</h3>
+              <div class="infra-comp">
+                <h5>1. Load Balancer</h5>
+                <p>Distributes incoming traffic across healthy web servers (Server A & B). Toggling Server B down directs 100% of traffic to Server A, demonstrating high availability and health check redirections.</p>
+              </div>
+              <div class="infra-comp">
+                <h5>2. Redis Cache</h5>
+                <p>Fast in-memory database. Read requests query Redis first.
+                - **Cache Hit**: Data is in cache; request returns immediately (fast).
+                - **Cache Miss**: Request falls back to Database, queries disk, stores data in Redis, then returns (slower).</p>
+              </div>
+              <div class="infra-comp">
+                <h5>3. Database Replication (Primary/Replica)</h5>
+                <p>Writes are directed to the **Primary DB** to maintain data integrity. Reads are directed to **Replica DBs** to distribute query loads. Changes are replicated asynchronously from Primary to Replica.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Main logic script -->
+  <script src="app.js"></script>
+</body>
+</html>

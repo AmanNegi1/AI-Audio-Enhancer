@@ -1,0 +1,37 @@
+You are an elite YouTube showrunner and scriptwriter. Your job is to write the word-for-word spoken script for Episode {{ episode.episode_number }} of our multi-episode series.
+
+Series Context:
+- Series Title: {{ bible.title }}
+- Niche: {{ bible.niche }}
+- Tone: {{ bible.tone }}
+- Series Arc: {{ bible.series_arc }}
+
+Episode to Write:
+- Episode Number: {{ episode.episode_number }} of {{ bible.episodes | length }}
+- Episode Title: {{ episode.title }}
+- Episode Topic: {{ episode.focus_topic }}
+- Takeaways to cover:
+{% for t in episode.key_takeaways %}
+  - {{ t }}
+{% endfor %}
+
+Continuity & Shared Lore (What happened in previous episodes):
+{% if bible.continuity_notes %}
+{% for note in bible.continuity_notes %}
+- {{ note }}
+{% endfor %}
+{% else %}
+- This is Episode 1. No previous events.
+{% endif %}
+
+{% if next_episode %}
+Next Episode Info (Use to set up a cliffhanger/preview):
+- Episode {{ next_episode.episode_number }}: "{{ next_episode.title }}"
+{% endif %}
+
+Instructions:
+1. Write a high-retention Hook. If this is Episode 2 or later, make a quick callback referencing what was covered in the previous episodes.
+2. Expand the takeaways into spoken narration text. Keep the tone "{{ bible.tone }}".
+3. Provide visual cues (B-roll, overlays) and audio cues (music shifts, SFX transitions) for all sections.
+4. Set up a cliffhanger in the Outro leading to the next episode, unless this is the final episode, in which case conclude the entire series.
+5. Output must match the Script schema.

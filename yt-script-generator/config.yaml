@@ -1,0 +1,53 @@
+niches:
+  - tech
+  - finance
+  - health
+  - true_crime
+  - history
+  - comedy
+
+tones:
+  - educational
+  - dramatic
+  - energetic
+  - casual
+  - humorous
+
+monetization_policy:
+  blocked_words:
+    - murder
+    - suicide
+    - kill
+    - bomb
+    - terrorist
+    - swear
+    - fuck
+    - shit
+    - asshole
+    - drug
+    - cocaine
+    - heroin
+    - hack
+    - crack
+  sensitive_topics:
+    - graphic violence
+    - self-harm
+    - illegal substances
+    - hate speech
+    - harassment
+
+copyright_policy:
+  transformative_rules:
+    - "Add original voiceover commentary rather than playing raw clips."
+    - "Limit copyrighted video clip usage to under 5 seconds for fair use context."
+    - "Always provide attribution or commentary during/after visual references."
+  royalty_free_resources:
+    - name: Pixabay
+      type: images/videos/music
+      url: "https://pixabay.com"
+    - name: Pexels
+      type: images/videos
+      url: "https://pexels.com"
+    - name: YouTube Audio Library
+      type: music/sfx
+      url: "https://youtube.com/audiolibrary"
